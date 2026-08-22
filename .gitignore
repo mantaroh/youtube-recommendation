@@ -1,0 +1,22 @@
+node_modules/
+dist/
+coverage/
+
+# WXT / extension build output
+.output/
+.wxt/
+
+# Cloudflare
+.wrangler/
+
+# Credentials (never commit)
+.env
+.env.local
+.env.*.local
+
+# Model cache used by local embedding runs
+.models/
+
+*.log
+.DS_Store
+Thumbs.db

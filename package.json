@@ -1,0 +1,19 @@
+{
+  "name": "youtube-recommendation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform-independent personal preference model, with YouTube as the first source",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "build": "pnpm -r --if-present build"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  }
+}
