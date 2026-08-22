@@ -1,9 +1,11 @@
 packages:
   - packages/*
 
+
 # Dependencies allowed to run install scripts (pnpm 11 requires an explicit decision).
 allowBuilds:
   esbuild: true
   workerd: true
   sharp: true
   onnxruntime-node: true
+  protobufjs: true
