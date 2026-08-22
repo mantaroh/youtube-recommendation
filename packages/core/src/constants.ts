@@ -105,3 +105,10 @@ export const POPULARITY_BOUNDS = {
 export const DEFAULT_FEED_SIZE = 40
 
 export const MILLISECONDS_PER_DAY = 86_400_000
+
+/**
+ * Standard deviations above typical pairwise similarity at which two rated items count
+ * as belonging to the same interest (see calibration.ts). Expressed relative to the
+ * observed distribution, so it holds wherever that distribution happens to sit.
+ */
+export const TAU_Z_SCORE = 1

@@ -197,6 +197,11 @@ export interface PreferenceState {
   seenKeys: string[]
   /** Sequence number of the last event folded into this state. */
   atSeq: number
+  /**
+   * Clustering threshold actually used, which is derived from the ratings rather than
+   * taken from settings once there are enough of them (design addendum 1).
+   */
+  effectiveTau: number
   /** Instant the state was evaluated at; decay is relative to this. */
   evaluatedAt: string
   modelId: string
@@ -250,6 +255,12 @@ export interface ScoreBreakdown {
   topClusterId: string | null
   topClusterLabel: string | null
   topClusterSimilarity: number
+  /**
+   * The same closeness expressed as a position within the candidate pool, in [0, 1].
+   * This is the figure worth showing: the raw cosine sits in a narrow high band and reads
+   * as a much stronger claim than it supports (design addendum 1).
+   */
+  topClusterRelative: number
 }
 
 export interface RankedItem {

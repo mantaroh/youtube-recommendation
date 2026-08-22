@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { countItems, listSince, purgeExpired, upsertItems, type SyncCursor } from './catalog.js'
-import { crawlMostPopular } from './youtube.js'
+import { crawlMostPopular, crawlRecentUploads } from './youtube.js'
 
 /**
  * The public catalog service.
@@ -20,6 +20,8 @@ export interface Env {
   ADMIN_TOKEN?: string
   CRAWL_REGIONS?: string
   CRAWL_CATEGORIES?: string
+  CRAWL_RECENT_DAYS?: string
+  CRAWL_RECENT_RESULTS?: string
 }
 
 const app = new Hono<{ Bindings: Env }>()
@@ -81,21 +83,43 @@ export async function runCrawl(env: Env, now: string): Promise<CrawlSummary> {
     return { crawled: 0, stored: 0, purged, requests: 0, errors: ["YOUTUBE_API_KEY is not set"], skipped: [] }
   }
 
-  const crawl = await crawlMostPopular({
+  const shared = {
     apiKey: env.YOUTUBE_API_KEY,
     regions: splitList(env.CRAWL_REGIONS, ['JP', 'US']),
     categories: splitList(env.CRAWL_CATEGORIES, ['28']),
     now,
-  })
+  }
 
-  const stored = await upsertItems(env.DB, crawl.items, now)
+  /**
+   * Two passes, because one of them alone gives a lopsided catalog.
+   *
+   * `mostPopular` supplies videos that are already established. Recent uploads supply
+   * everything else, including the small and the new — the strata the ranker reserves
+   * slots for and could not otherwise fill (design addendum 2).
+   */
+  const [popular, recent] = await Promise.all([
+    crawlMostPopular(shared),
+    crawlRecentUploads({
+      ...shared,
+      days: Number(env.CRAWL_RECENT_DAYS ?? '7'),
+      maxResults: Number(env.CRAWL_RECENT_RESULTS ?? '25'),
+    }),
+  ])
+
+  // The same video can appear in both passes; store it once.
+  const byId = new Map(
+    [...popular.items, ...recent.items].map((item) => [item.externalId, item] as const),
+  )
+  const items = [...byId.values()]
+  const stored = await upsertItems(env.DB, items, now)
+
   return {
-    crawled: crawl.items.length,
+    crawled: items.length,
     stored,
     purged,
-    requests: crawl.requests,
-    errors: crawl.errors,
-    skipped: crawl.skipped,
+    requests: popular.requests + recent.requests,
+    errors: [...popular.errors, ...recent.errors],
+    skipped: [...popular.skipped, ...recent.skipped],
   }
 }
 

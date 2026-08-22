@@ -66,6 +66,7 @@ function state(overrides: Partial<PreferenceState> = {}): PreferenceState {
     ratedKeys: [],
     seenKeys: [],
     atSeq: 0,
+    effectiveTau: 0.55,
     evaluatedAt: NOW,
     modelId: 'test',
     dimensions: 4,
@@ -287,8 +288,14 @@ describe('feed assembly', () => {
     })
 
     expect(new Set(feed.map((entry) => entry.lane)).size).toBe(3)
+
     // The explore lane brings in something outside the user's established interests.
-    expect(feed.some((entry) => entry.breakdown.explore > 0.9)).toBe(true)
+    // Asserted as a comparison rather than against a fixed number: with calibration the
+    // novelty term is a position within the candidate pool, so its absolute value depends
+    // on what else is in the pool.
+    const highest = (lane: string) =>
+      Math.max(...feed.filter((entry) => entry.lane === lane).map((entry) => entry.breakdown.explore))
+    expect(highest('explore')).toBeGreaterThan(highest('subscription'))
   })
 
   it('gives small and evergreen videos a share instead of filtering them out', () => {
@@ -379,6 +386,7 @@ function mmrEntry(id: string, embedding: Float32Array, total: number) {
       topClusterId: null,
       topClusterLabel: null,
       topClusterSimilarity: 0,
+      topClusterRelative: 0,
     },
   }
 }

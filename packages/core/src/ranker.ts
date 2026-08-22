@@ -21,6 +21,7 @@ import {
   SUBSCRIBED_CHANNEL_BONUS,
 } from './constants.js'
 import { decayAt } from './decay.js'
+import { calibrate, calibrateSigned, similarityStats, type SimilarityStats } from './calibration.js'
 import { cosine } from './vector.js'
 
 /**
@@ -43,6 +44,12 @@ export interface RankingContext {
   now: string
   weights?: ScoreWeights
   subscribedChannelIds?: ReadonlySet<string>
+  /**
+   * Similarity distribution per cluster across the whole candidate pool. Supplied by
+   * `assembleFeed`; without it, scoring falls back to raw cosine, which is only
+   * meaningful when comparing two candidates scored the same way.
+   */
+  similarityStats?: ReadonlyMap<string, SimilarityStats>
   /**
    * Membership sets built once per feed rather than per candidate. Scoring thousands of
    * candidates against thousands of ratings with a linear scan each time is quadratic;
@@ -91,6 +98,10 @@ export function scoreCandidate(candidate: Candidate, context: RankingContext): S
   let bestSimilarity = 0
   let topCluster: InterestCluster | undefined
 
+  let bestRelative = 0
+  /** Undefined until some interest has been compared against; see `explore` below. */
+  let bestSignedRelative: number | undefined
+
   if (embedding) {
     for (const cluster of context.state.clusters) {
       // A forgotten interest neither attracts nor suppresses: the user asked for it to
@@ -99,23 +110,39 @@ export function scoreCandidate(candidate: Candidate, context: RankingContext): S
 
       // Negative similarity means "points the other way", which is not evidence about
       // this topic at all, so it is floored rather than allowed to subtract.
+      //
+      // A similarity of zero is not skipped: it contributes nothing to the positive terms
+      // anyway, but it is the strongest possible evidence of novelty, and skipping it left
+      // a video orthogonal to every interest scoring zero on exploration.
       const similarity = Math.max(0, cosine(embedding, cluster.centroid))
-      if (similarity === 0) continue
 
-      const longTerm = cluster.activity * cluster.normalisedLong * similarity
+      /**
+       * The raw cosine is turned into a position within the candidate pool before it
+       * reaches the score. A sentence encoder puts every pair in a narrow high band, so
+       * the raw value says almost nothing on its own; what carries information is being
+       * closer to this interest than the other candidates are (design addendum 1).
+       */
+      const stats = context.similarityStats?.get(cluster.id)
+      const relative = stats ? calibrate(similarity, stats) : similarity
+      const signedRelative = stats ? calibrateSigned(similarity, stats) : similarity
+
+      const longTerm = cluster.activity * cluster.normalisedLong * relative
       if (longTerm > long) {
         long = longTerm
         topCluster = cluster
+        bestRelative = relative
       }
-      short = Math.max(short, cluster.activity * cluster.normalisedShort * similarity)
+      short = Math.max(short, cluster.activity * cluster.normalisedShort * relative)
       // Suppression survives a mute: muting hides an interest, it does not undo a dislike.
-      negative = Math.max(negative, cluster.normalisedNegative * similarity)
-      bestSimilarity = Math.max(bestSimilarity, similarity)
+      negative = Math.max(negative, cluster.normalisedNegative * relative)
+      if (similarity > bestSimilarity) bestSimilarity = similarity
+      bestSignedRelative = Math.max(bestSignedRelative ?? 0, signedRelative)
     }
   }
 
   const channel = channelAffinity(item, context)
-  const explore = embedding ? 1 - bestSimilarity : 0
+  // Nothing to be far from — no vector, or no interests yet — is not novelty.
+  const explore = bestSignedRelative === undefined ? 0 : 1 - bestSignedRelative
   const freshness = decayAt(item.publishedAt, context.now, FRESHNESS_HALF_LIFE_DAYS)
 
   const rated = context.ratedKeySet ?? new Set(context.state.ratedKeys)
@@ -145,6 +172,7 @@ export function scoreCandidate(candidate: Candidate, context: RankingContext): S
     topClusterId: topCluster?.id ?? null,
     topClusterLabel: topCluster?.label ?? null,
     topClusterSimilarity: bestSimilarity,
+    topClusterRelative: bestRelative,
   }
 }
 
@@ -245,8 +273,39 @@ export interface AssembleInput extends RankingContext {
 /**
  * Builds the feed: score, fill each lane, then re-rank the result for diversity.
  */
+/**
+ * Similarity distribution of each interest across every candidate.
+ *
+ * Computed over the whole pool rather than per lane, so that a candidate's position means
+ * the same thing whichever lane it arrived in.
+ */
+export function computeSimilarityStats(
+  candidates: readonly Candidate[],
+  clusters: readonly InterestCluster[],
+): Map<string, SimilarityStats> {
+  const stats = new Map<string, SimilarityStats>()
+  const embeddings = candidates
+    .map((candidate) => candidate.embedding)
+    .filter((embedding): embedding is Float32Array => Boolean(embedding))
+
+  for (const cluster of clusters) {
+    if (cluster.forgotten) continue
+    const values = embeddings.map((embedding) => Math.max(0, cosine(embedding, cluster.centroid)))
+    stats.set(cluster.id, similarityStats(values))
+  }
+  return stats
+}
+
 export function assembleFeed(input: AssembleInput): RankedItem[] {
-  const context = withKeySets(input) as AssembleInput
+  const pool = [
+    ...(input.candidates.subscription ?? []),
+    ...(input.candidates.related ?? []),
+    ...(input.candidates.explore ?? []),
+  ]
+  const context = {
+    ...withKeySets(input),
+    similarityStats: input.similarityStats ?? computeSimilarityStats(pool, input.state.clusters),
+  } as AssembleInput
   const quotas = laneQuotas(input.discovery, input.feedSize)
   const chosen: Array<{ entry: ScoredCandidate; lane: Lane }> = []
   const taken = new Set<string>()

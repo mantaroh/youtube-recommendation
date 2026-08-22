@@ -97,6 +97,118 @@ export async function crawlMostPopular(options: CrawlOptions): Promise<CrawlResu
   return { items: [...byId.values()], requests, errors, skipped }
 }
 
+export interface RecentCrawlOptions extends CrawlOptions {
+  /** How far back to look. */
+  days?: number
+}
+
+/**
+ * Recent uploads, regardless of how popular they are.
+ *
+ * `chart=mostPopular` can only ever return established videos, so a catalog built from it
+ * alone cannot fill the emerging and evergreen slots the ranker reserves — it supplies
+ * exactly the popularity bias section 4.3 exists to avoid. Ordering by date instead spans
+ * the whole range, and asks nothing about anyone's preferences (design addendum 2).
+ *
+ * One `search.list` call per region, which draws on a budget separate from everything else.
+ */
+export async function crawlRecentUploads(options: RecentCrawlOptions): Promise<CrawlResult> {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const maxResults = Math.min(50, Math.max(1, options.maxResults ?? 25))
+  const publishedAfter = new Date(
+    Date.parse(options.now) - (options.days ?? 7) * 86_400_000,
+  ).toISOString()
+
+  const videoIds = new Set<string>()
+  const errors: string[] = []
+  const skipped: string[] = []
+  let requests = 0
+
+  /**
+   * No category filter. Filtering by `videoCategoryId` here returned nothing at all
+   * against the live API: category is sparsely populated in the search index, unlike in
+   * the popular chart. It is no loss — this pass exists to reach videos of every
+   * popularity level, not to cover categories, which the popular pass already does.
+   */
+  for (const region of options.regions) {
+    const url = new URL(`${API_ROOT}/search`)
+    url.searchParams.set('part', 'id')
+    url.searchParams.set('type', 'video')
+    url.searchParams.set('order', 'date')
+    url.searchParams.set('regionCode', region)
+    url.searchParams.set('publishedAfter', publishedAfter)
+    url.searchParams.set('maxResults', String(maxResults))
+    url.searchParams.set('key', options.apiKey)
+
+    try {
+      requests += 1
+      const response = await fetchImpl(url.toString(), { headers: { Accept: 'application/json' } })
+      if (response.status === 404) {
+        skipped.push(region)
+        continue
+      }
+      if (!response.ok) {
+        errors.push(`${region}: ${response.status} ${await describeFailure(response)}`)
+        continue
+      }
+      const payload = (await response.json()) as { items?: Array<{ id?: { videoId?: string } }> }
+      for (const entry of payload.items ?? []) {
+        if (entry.id?.videoId) videoIds.add(entry.id.videoId)
+      }
+    } catch (error) {
+      errors.push(`${region}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  // Search results carry no statistics or duration, so the metadata has to be filled in.
+  const filled = await hydrate([...videoIds], options.apiKey, options.now, fetchImpl)
+
+  return {
+    items: filled.items,
+    requests: requests + filled.requests,
+    errors: [...errors, ...filled.errors],
+    skipped,
+  }
+}
+
+async function hydrate(
+  videoIds: string[],
+  apiKey: string,
+  now: string,
+  fetchImpl: typeof fetch,
+): Promise<{ items: CatalogItem[]; requests: number; errors: string[] }> {
+  const items: CatalogItem[] = []
+  const errors: string[] = []
+  let requests = 0
+
+  for (let offset = 0; offset < videoIds.length; offset += 50) {
+    const batch = videoIds.slice(offset, offset + 50)
+    const url = new URL(`${API_ROOT}/videos`)
+    url.searchParams.set('part', 'snippet,contentDetails,statistics')
+    url.searchParams.set('id', batch.join(','))
+    url.searchParams.set('maxResults', '50')
+    url.searchParams.set('key', apiKey)
+
+    try {
+      requests += 1
+      const response = await fetchImpl(url.toString(), { headers: { Accept: 'application/json' } })
+      if (!response.ok) {
+        errors.push(`hydrate: ${response.status} ${await describeFailure(response)}`)
+        continue
+      }
+      const payload = (await response.json()) as { items?: VideoResource[] }
+      for (const resource of payload.items ?? []) {
+        const item = toCatalogItem(resource, now)
+        if (item) items.push(item)
+      }
+    } catch (error) {
+      errors.push(`hydrate: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  return { items, requests, errors }
+}
+
 /**
  * A short reason from a failed response.
  *

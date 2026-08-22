@@ -68,19 +68,20 @@ export function VideoCard({ item, rating, onRate, ranked }: VideoCardProps) {
 /**
  * Why this video is here. The score is a formula, so it can always be spelled out.
  *
- * The interest is described as the *nearest* one rather than as one this video is "close
- * to". That is the claim the number actually supports: sentence encoder similarities sit
- * in a narrow high band, so 82% is near the floor of the range rather than a strong match,
- * and calling it "close" would read as a much stronger statement than the model is making.
- * The figure is shown so the claim can be checked instead of taken on faith.
+ * The figure shown is the calibrated one — how close this video is to the interest
+ * *compared with the other candidates* — not the raw cosine. Raw similarities from a
+ * sentence encoder sit in a narrow high band, so an unrelated video reads as "82%", which
+ * states something far stronger than the model believes.
  */
 function Explanation({ ranked }: { ranked: RankedItem }) {
   const { breakdown, lane } = ranked
   const reasons: string[] = []
   if (lane === 'subscription') reasons.push('from a channel you follow')
-  if (breakdown.topClusterLabel) {
+  if (breakdown.topClusterLabel && breakdown.topClusterRelative > 0) {
     reasons.push(
-      `nearest interest “${breakdown.topClusterLabel}” (${Math.round(breakdown.topClusterSimilarity * 100)}%)`,
+      // 0 means "as close as a typical candidate", 1 means "two standard deviations
+      // closer". Not a percentile, so it is not written as one.
+      `nearer “${breakdown.topClusterLabel}” than average (${breakdown.topClusterRelative.toFixed(2)})`,
     )
   }
   if (lane === 'explore') reasons.push('further from your usual interests')

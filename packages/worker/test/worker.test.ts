@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import worker, { runCrawl, type Env } from '../src/index.js'
-import { crawlMostPopular, parseIso8601Duration } from '../src/youtube.js'
+import { crawlMostPopular, crawlRecentUploads, parseIso8601Duration } from '../src/youtube.js'
 import { upsertItems } from '../src/catalog.js'
 import { createTestDatabase } from './d1.js'
 
@@ -130,6 +130,106 @@ describe('crawl', () => {
   it('reads ISO 8601 durations', () => {
     expect(parseIso8601Duration('PT1H30M')).toBe(5400)
     expect(parseIso8601Duration(undefined)).toBe(0)
+  })
+})
+
+describe('recent uploads crawl', () => {
+  const searchThenHydrate = (ids: string[]) =>
+    (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/search')) {
+        return new Response(JSON.stringify({ items: ids.map((id) => ({ id: { videoId: id } })) }), {
+          status: 200,
+        })
+      }
+      return new Response(JSON.stringify(videoPayload(ids)), { status: 200 })
+    }) as unknown as typeof fetch
+
+  it('searches by date and fills in the metadata search does not return', async () => {
+    const result = await crawlRecentUploads({
+      apiKey: 'key',
+      regions: ['JP'],
+      categories: ['28'],
+      now: NOW,
+      fetchImpl: searchThenHydrate(['a', 'b']),
+    })
+
+    expect(result.items.map((item) => item.externalId).sort()).toEqual(['a', 'b'])
+    // Search alone carries no duration or view count; those come from the second call.
+    expect(result.items[0].durationSeconds).toBe(600)
+    expect(result.items[0].viewCount).toBe(4321)
+    expect(result.requests).toBe(2)
+  })
+
+  it('asks only for uploads inside the window', async () => {
+    const urls: string[] = []
+    const capture = (async (input: RequestInfo | URL) => {
+      urls.push(String(input))
+      return new Response(JSON.stringify({ items: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    await crawlRecentUploads({
+      apiKey: 'key',
+      regions: ['JP'],
+      categories: ['28'],
+      days: 7,
+      now: NOW,
+      fetchImpl: capture,
+    })
+
+    const publishedAfter = new URL(urls[0]).searchParams.get("publishedAfter")!
+    expect(Date.parse(NOW) - Date.parse(publishedAfter)).toBe(7 * 86_400_000)
+    expect(new URL(urls[0]).searchParams.get('order')).toBe('date')
+  })
+
+  it('makes no hydration call when nothing was found', async () => {
+    const empty = (async () =>
+      new Response(JSON.stringify({ items: [] }), { status: 200 })) as unknown as typeof fetch
+
+    const result = await crawlRecentUploads({
+      apiKey: 'key',
+      regions: ['JP'],
+      categories: ['28'],
+      now: NOW,
+      fetchImpl: empty,
+    })
+
+    expect(result.items).toEqual([])
+    expect(result.requests).toBe(1)
+  })
+
+  it('reaches beyond the popular chart, which is what the strata need', async () => {
+    // The point of the second pass: `chart=mostPopular` can only return established
+    // videos, so the emerging and evergreen slots could never be filled from it.
+    const unpopular = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/search')) {
+        return new Response(JSON.stringify({ items: [{ id: { videoId: 'small' } }] }), { status: 200 })
+      }
+      return new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: 'small',
+              snippet: { title: 'A new upload', channelId: 'UC_x', publishedAt: NOW },
+              contentDetails: { duration: 'PT5M' },
+              statistics: { viewCount: '12' },
+            },
+          ],
+        }),
+        { status: 200 },
+      )
+    }) as unknown as typeof fetch
+
+    const result = await crawlRecentUploads({
+      apiKey: 'key',
+      regions: ['JP'],
+      categories: ['28'],
+      now: NOW,
+      fetchImpl: unpopular,
+    })
+
+    expect(result.items[0].viewCount).toBe(12)
   })
 })
 

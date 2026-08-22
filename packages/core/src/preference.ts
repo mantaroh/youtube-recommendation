@@ -15,7 +15,9 @@ import {
   PIN_MIN_ACTIVITY,
   RATING_WEIGHTS,
   TAU,
+  TAU_Z_SCORE,
 } from './constants.js'
+import { adaptiveThreshold } from './calibration.js'
 import { LeaderClusterer } from './clustering.js'
 import { decayAt } from './decay.js'
 import { labelClusters } from './labeling.js'
@@ -72,11 +74,26 @@ function emptyOverride(): OverrideState {
 }
 
 export function buildPreferenceState(input: PreferenceInput): PreferenceState {
-  const tau = input.tau ?? TAU
   const kMax = input.kMax ?? K_MAX
-  const clusterer = new LeaderClusterer({ dimensions: input.dimensions, tau, kMax })
-
   const events = truncate(input.events, input.upToTs, input.upToSeq)
+
+  /**
+   * The threshold comes from the ratings rather than from settings, once there are enough
+   * of them. A fixed cosine cannot work across embedding models: with a sentence encoder
+   * every pair sits in a narrow high band, so a constant either merges everything into one
+   * interest or separates nothing (design addendum 1).
+   */
+  const ratedVectors = events
+    .filter((event): event is typeof event & { type: 'rating' } => event.type === 'rating')
+    .map((event) => input.embeddings.get(itemKey(event)))
+    .filter((vector): vector is Float32Array => Boolean(vector))
+
+  const tau = adaptiveThreshold(ratedVectors, {
+    zScore: TAU_Z_SCORE,
+    fallback: input.tau ?? TAU,
+  })
+
+  const clusterer = new LeaderClusterer({ dimensions: input.dimensions, tau, kMax })
   const overrideEvents: InterestOverrideEvent[] = []
   const revivedAtSeq = new Map<string, number>()
   const channels: Record<string, ChannelAffinity> = {}
@@ -135,6 +152,7 @@ export function buildPreferenceState(input: PreferenceInput): PreferenceState {
     ratedKeys: [...ratedKeys],
     seenKeys: [...seenKeys],
     atSeq,
+    effectiveTau: tau,
     evaluatedAt: input.now,
     modelId: input.modelId,
     dimensions: input.dimensions,

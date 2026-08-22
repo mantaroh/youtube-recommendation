@@ -88,6 +88,48 @@ describe('clustering', () => {
     expect(Object.values(state.channels)[0]?.ratedCount).toBe(1)
   })
 
+  it('separates topics whose similarities all sit in a narrow high band', () => {
+    // Reproduces what the real encoder produced: same-topic pairs near 0.86, different
+    // topics near 0.77. A fixed threshold of 0.55 collapsed all of this into one interest.
+    const dimensions = 24
+    const encoderLike = (topic: number, index: number) => {
+      const vector = new Float32Array(dimensions)
+      vector[0] = 0.8775
+      vector[1 + topic] = 0.3
+      vector[8 + index] = 0.3742
+      const length = Math.hypot(...vector)
+      return vector.map((value) => value / length) as Float32Array
+    }
+
+    const embeddings = new Map<string, Float32Array>()
+    const events: AppEvent[] = []
+    for (let index = 0; index < 14; index++) {
+      const id = `v${index}`
+      embeddings.set(`youtube:${id}`, encoderLike(index < 7 ? 0 : 1, index))
+      events.push({
+        seq: index + 1,
+        ts: NOW,
+        type: 'rating',
+        source: 'youtube',
+        externalId: id,
+        rating: 5,
+      })
+    }
+
+    const built = buildPreferenceState({
+      events,
+      embeddings,
+      now: NOW,
+      modelId: 'test',
+      dimensions,
+    })
+
+    expect(built.clusters).toHaveLength(2)
+    // The threshold used has to sit inside the band, not at the configured 0.55.
+    expect(built.effectiveTau).toBeGreaterThan(0.7)
+    expect(built.effectiveTau).toBeLessThan(0.9)
+  })
+
   it('is deterministic: the same log produces the same state', () => {
     const input = scenario([
       { id: 'b1', topic: 'browser', rating: 5, ts: NOW },
