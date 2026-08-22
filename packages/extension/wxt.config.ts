@@ -21,7 +21,13 @@ export default defineConfig({
       'A recommendation profile you own: ratings, interest decay and ranking all stay on this machine.',
     version: '0.1.0',
     permissions: ['storage', 'unlimitedStorage', 'identity', 'alarms'],
-    host_permissions: ['https://www.googleapis.com/*', 'https://oauth2.googleapis.com/*'],
+    host_permissions: [
+      'https://www.googleapis.com/*',
+      'https://oauth2.googleapis.com/*',
+      // The optional shared catalog, which is deployed to workers.dev by default. A
+      // catalog on a custom domain needs its origin added here.
+      'https://*.workers.dev/*',
+    ],
     action: {
       default_title: 'Open my feed',
     },

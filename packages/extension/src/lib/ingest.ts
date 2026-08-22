@@ -7,6 +7,7 @@ import { resolveSource, type SourceMode } from './sources/factory.js'
 import { readLedger } from './sources/youtube/quota.js'
 import { QuotaExhaustedError } from './sources/youtube/client.js'
 import { loadPreferenceContext } from './preference.js'
+import { pullSharedCatalog } from './sources/sharedCatalog.js'
 
 /**
  * Ingestion: fetch metadata, store it, embed it, and drop what has expired.
@@ -83,8 +84,17 @@ export async function runIngestion(options: IngestOptions): Promise<IngestReport
     errors.push(describeError(error))
   }
 
-  const newItems = await storeItems(fetched)
-  report(`Stored ${fetched.length} items (${newItems} new)`)
+  // The shared catalog is optional and never blocks a run: if it is unreachable the
+  // subscription lane is unaffected.
+  let shared: CatalogItem[] = []
+  try {
+    shared = (await pullSharedCatalog({ onProgress: report })).items
+  } catch (error) {
+    errors.push(describeError(error))
+  }
+
+  const newItems = await storeItems([...fetched, ...shared])
+  report(`Stored ${fetched.length + shared.length} items (${newItems} new)`)
 
   let embedded = 0
   try {
@@ -102,7 +112,7 @@ export async function runIngestion(options: IngestOptions): Promise<IngestReport
     startedAt,
     finishedAt: now(),
     channelCount: channelIds.length,
-    fetchedItems: fetched.length,
+    fetchedItems: fetched.length + shared.length,
     newItems,
     embedded,
     purgedItems,

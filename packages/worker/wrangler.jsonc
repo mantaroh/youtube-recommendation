@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ypr-catalog",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The public catalog. It holds no preference data of any kind, which is why it can live
+  // on someone else's machine at all (design section 1).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "catalog",
+      // Filled in by `wrangler d1 create catalog` before the first deploy.
+      "database_id": "REPLACE_WITH_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Crawl and expiry sweep. Unauthenticated API data has to be refreshed or deleted
+  // within 30 days (design section 6.2), so the sweep is not optional.
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    "CRAWL_REGIONS": "JP,US",
+    "CRAWL_CATEGORIES": "28,27,26,24"
+  }
+}

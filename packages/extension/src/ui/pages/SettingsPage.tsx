@@ -7,6 +7,7 @@ import {
   setCredentials,
   signOut,
 } from '../../lib/sources/youtube/auth.js'
+import { getCatalogEndpoint, setCatalogEndpoint } from '../../lib/sources/sharedCatalog.js'
 import { useAsync } from '../hooks.js'
 
 /**
@@ -109,6 +110,8 @@ export function SettingsPage() {
         </button>
       </section>
 
+      <SharedCatalogSettings />
+
       <section className="panel">
         <h2>Redirect URI to register</h2>
         <p className="muted small">
@@ -118,6 +121,52 @@ export function SettingsPage() {
         <pre className="log">{redirectUri}</pre>
       </section>
     </>
+  )
+}
+
+/**
+ * The shared catalog is optional. It answers "what videos exist" and is never told who is
+ * asking or what they like (design section 1.1).
+ */
+function SharedCatalogSettings() {
+  const stored = useAsync(getCatalogEndpoint, [])
+  const [endpoint, setEndpoint] = useState('')
+  const [message, setMessage] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    if (stored.value !== undefined) setEndpoint(stored.value)
+  }, [stored.value])
+
+  return (
+    <section className="panel">
+      <h2>Shared catalog (optional)</h2>
+      <p className="muted small">
+        A catalog service saves every installation from crawling the same public videos. Requests to
+        it carry a paging cursor and nothing else — no interests, no ratings, no identifier. Leave it
+        empty to work only from your subscriptions and your own searches.
+      </p>
+      <label className="field">
+        <span>Endpoint</span>
+        <input
+          type="text"
+          value={endpoint}
+          onChange={(event) => setEndpoint(event.target.value)}
+          placeholder="https://ypr-catalog.example.workers.dev"
+        />
+      </label>
+      <button
+        className="action"
+        onClick={() =>
+          void setCatalogEndpoint(endpoint.trim()).then(() => {
+            setMessage(endpoint.trim() ? 'Saved. The next fetch will sync from it.' : 'Disabled.')
+            stored.reload()
+          })
+        }
+      >
+        Save
+      </button>
+      {message ? <div className="notice">{message}</div> : null}
+    </section>
   )
 }
 
