@@ -1,6 +1,13 @@
 import { Hono } from 'hono'
-import { countItems, listSince, purgeExpired, upsertItems, type SyncCursor } from './catalog.js'
-import { crawlMostPopular, crawlRecentUploads } from './youtube.js'
+import {
+  countItems,
+  listChannelsToRefresh,
+  listSince,
+  purgeExpired,
+  upsertItems,
+  type SyncCursor,
+} from './catalog.js'
+import { crawlChannelUploads, crawlMostPopular } from './youtube.js'
 
 /**
  * The public catalog service.
@@ -20,8 +27,8 @@ export interface Env {
   ADMIN_TOKEN?: string
   CRAWL_REGIONS?: string
   CRAWL_CATEGORIES?: string
-  CRAWL_RECENT_DAYS?: string
-  CRAWL_RECENT_RESULTS?: string
+  CRAWL_CHANNELS_PER_RUN?: string
+  CRAWL_UPLOADS_PER_CHANNEL?: string
 }
 
 const app = new Hono<{ Bindings: Env }>()
@@ -93,16 +100,20 @@ export async function runCrawl(env: Env, now: string): Promise<CrawlSummary> {
   /**
    * Two passes, because one of them alone gives a lopsided catalog.
    *
-   * `mostPopular` supplies videos that are already established. Recent uploads supply
-   * everything else, including the small and the new — the strata the ranker reserves
-   * slots for and could not otherwise fill (design addendum 2).
+   * `mostPopular` supplies videos that are already established. Walking the uploads of
+   * channels already in the catalog supplies everything else, including the new and the
+   * barely watched — the strata the ranker reserves slots for and could not otherwise
+   * fill (design addendum 2).
    */
+  const channelIds = await listChannelsToRefresh(env.DB, Number(env.CRAWL_CHANNELS_PER_RUN ?? '40'))
+
   const [popular, recent] = await Promise.all([
     crawlMostPopular(shared),
-    crawlRecentUploads({
-      ...shared,
-      days: Number(env.CRAWL_RECENT_DAYS ?? '7'),
-      maxResults: Number(env.CRAWL_RECENT_RESULTS ?? '25'),
+    crawlChannelUploads({
+      apiKey: env.YOUTUBE_API_KEY,
+      channelIds,
+      maxPerChannel: Number(env.CRAWL_UPLOADS_PER_CHANNEL ?? '5'),
+      now,
     }),
   ])
 

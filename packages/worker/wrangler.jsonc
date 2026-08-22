@@ -32,9 +32,9 @@
     // 27 (Education) has no popular chart in these regions and returns 404.
     "CRAWL_CATEGORIES": "28,26,24",
 
-    // Recent uploads are fetched with search.list, which draws on a budget of its own.
-    // 2 regions x 3 categories x 4 runs a day = 24 of the 100 daily calls.
-    "CRAWL_RECENT_DAYS": "7",
-    "CRAWL_RECENT_RESULTS": "25"
+    // Recent uploads are walked per channel, one unit each, rotating through the catalog.
+    // 40 channels x 4 runs a day = 160 units, against an allowance of 10,000.
+    "CRAWL_CHANNELS_PER_RUN": "40",
+    "CRAWL_UPLOADS_PER_CHANNEL": "5"
   }
 }

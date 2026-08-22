@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import worker, { runCrawl, type Env } from '../src/index.js'
-import { crawlMostPopular, crawlRecentUploads, parseIso8601Duration } from '../src/youtube.js'
+import {
+  crawlChannelUploads,
+  crawlMostPopular,
+  parseIso8601Duration,
+  uploadsPlaylistId,
+} from '../src/youtube.js'
 import { upsertItems } from '../src/catalog.js'
 import { createTestDatabase } from './d1.js'
 
@@ -33,7 +38,27 @@ function stubFetch(handler: (url: string) => unknown): typeof fetch {
     })) as unknown as typeof fetch
 }
 
-describe('crawl', () => {
+function catalogItem(externalId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    source: 'youtube' as const,
+    externalId,
+    title: 't',
+    description: '',
+    tags: [] as string[],
+    channelId: 'UC_x',
+    channelTitle: 'C',
+    officialCategoryId: '28',
+    durationSeconds: 1,
+    publishedAt: NOW,
+    viewCount: 0,
+    metadataFetchedAt: NOW,
+    expiresAt: '2026-12-01T00:00:00.000Z',
+    provenance: 'youtube_api' as const,
+    ...overrides,
+  }
+}
+
+describe('popular chart crawl', () => {
   it('collects each video once even when regions overlap', async () => {
     const result = await crawlMostPopular({
       apiKey: 'key',
@@ -91,7 +116,10 @@ describe('crawl', () => {
     const failing = (async () =>
       new Response(
         JSON.stringify({
-          error: { code: 403, message: 'The request cannot be completed because you have exceeded your quota.' },
+          error: {
+            code: 403,
+            message: 'The request cannot be completed because you have exceeded your quota.',
+          },
         }),
         { status: 403 },
       )) as unknown as typeof fetch
@@ -104,7 +132,9 @@ describe('crawl', () => {
       fetchImpl: failing,
     })
 
-    expect(result.errors).toEqual(['JP/28: 403 The request cannot be completed because you have exceeded your quota.'])
+    expect(result.errors).toEqual([
+      'JP/28: 403 The request cannot be completed because you have exceeded your quota.',
+    ])
   })
 
   it('records a failing region without abandoning the rest of the crawl', async () => {
@@ -133,87 +163,111 @@ describe('crawl', () => {
   })
 })
 
-describe('recent uploads crawl', () => {
-  const searchThenHydrate = (ids: string[]) =>
+describe('channel uploads crawl', () => {
+  const playlistThenHydrate = (ids: string[]) =>
     (async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes('/search')) {
-        return new Response(JSON.stringify({ items: ids.map((id) => ({ id: { videoId: id } })) }), {
-          status: 200,
-        })
+      if (String(input).includes('/playlistItems')) {
+        return new Response(
+          JSON.stringify({ items: ids.map((id) => ({ contentDetails: { videoId: id } })) }),
+          { status: 200 },
+        )
       }
       return new Response(JSON.stringify(videoPayload(ids)), { status: 200 })
     }) as unknown as typeof fetch
 
-  it('searches by date and fills in the metadata search does not return', async () => {
-    const result = await crawlRecentUploads({
-      apiKey: 'key',
-      regions: ['JP'],
-      categories: ['28'],
-      now: NOW,
-      fetchImpl: searchThenHydrate(['a', 'b']),
-    })
-
-    expect(result.items.map((item) => item.externalId).sort()).toEqual(['a', 'b'])
-    // Search alone carries no duration or view count; those come from the second call.
-    expect(result.items[0].durationSeconds).toBe(600)
-    expect(result.items[0].viewCount).toBe(4321)
-    expect(result.requests).toBe(2)
+  it('derives the uploads playlist from the channel id', () => {
+    expect(uploadsPlaylistId('UCabc123')).toBe('UUabc123')
+    expect(uploadsPlaylistId('PLnot-a-channel')).toBeUndefined()
+    expect(uploadsPlaylistId('UC')).toBeUndefined()
   })
 
-  it('asks only for uploads inside the window', async () => {
+  it('walks each channel and fills in the metadata a playlist entry lacks', async () => {
     const urls: string[] = []
     const capture = (async (input: RequestInfo | URL) => {
       urls.push(String(input))
-      return new Response(JSON.stringify({ items: [] }), { status: 200 })
+      return playlistThenHydrate(['a', 'b'])(input)
     }) as unknown as typeof fetch
 
-    await crawlRecentUploads({
+    const result = await crawlChannelUploads({
       apiKey: 'key',
-      regions: ['JP'],
-      categories: ['28'],
-      days: 7,
+      channelIds: ['UCone'],
       now: NOW,
       fetchImpl: capture,
     })
 
-    const publishedAfter = new URL(urls[0]).searchParams.get("publishedAfter")!
-    expect(Date.parse(NOW) - Date.parse(publishedAfter)).toBe(7 * 86_400_000)
-    expect(new URL(urls[0]).searchParams.get('order')).toBe('date')
+    expect(new URL(urls[0]).searchParams.get('playlistId')).toBe('UUone')
+    expect(result.items.map((item) => item.externalId).sort()).toEqual(['a', 'b'])
+    // A playlist entry carries only an id; duration and views come from the second call.
+    expect(result.items[0].durationSeconds).toBe(600)
+    expect(result.requests).toBe(2)
   })
 
-  it('makes no hydration call when nothing was found', async () => {
-    const empty = (async () =>
-      new Response(JSON.stringify({ items: [] }), { status: 200 })) as unknown as typeof fetch
+  it('never spends the search budget, which is a hundred times scarcer', async () => {
+    const urls: string[] = []
+    const capture = (async (input: RequestInfo | URL) => {
+      urls.push(String(input))
+      return playlistThenHydrate(['a'])(input)
+    }) as unknown as typeof fetch
 
-    const result = await crawlRecentUploads({
+    await crawlChannelUploads({ apiKey: 'key', channelIds: ['UCone'], now: NOW, fetchImpl: capture })
+    expect(urls.some((url) => url.includes('/search'))).toBe(false)
+  })
+
+  it('skips a channel that cannot be walked instead of failing the run', async () => {
+    const missing = (async (input: RequestInfo | URL) => {
+      if (String(input).includes('UUgone')) {
+        return new Response(JSON.stringify({ error: { message: 'not found' } }), { status: 404 })
+      }
+      return playlistThenHydrate(['a'])(input)
+    }) as unknown as typeof fetch
+
+    const result = await crawlChannelUploads({
       apiKey: 'key',
-      regions: ['JP'],
-      categories: ['28'],
+      channelIds: ['UCgone', 'UCok'],
       now: NOW,
-      fetchImpl: empty,
+      fetchImpl: missing,
     })
 
-    expect(result.items).toEqual([])
-    expect(result.requests).toBe(1)
+    expect(result.skipped).toEqual(['UCgone'])
+    expect(result.errors).toEqual([])
+    expect(result.items).toHaveLength(1)
   })
 
-  it('reaches beyond the popular chart, which is what the strata need', async () => {
-    // The point of the second pass: `chart=mostPopular` can only return established
-    // videos, so the emerging and evergreen slots could never be filled from it.
-    const unpopular = (async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes('/search')) {
-        return new Response(JSON.stringify({ items: [{ id: { videoId: 'small' } }] }), { status: 200 })
+  it('skips an id that is not a channel without calling anything', async () => {
+    let calls = 0
+    const counting = (async (input: RequestInfo | URL) => {
+      calls += 1
+      return playlistThenHydrate(['a'])(input)
+    }) as unknown as typeof fetch
+
+    const result = await crawlChannelUploads({
+      apiKey: 'key',
+      channelIds: ['PLplaylist'],
+      now: NOW,
+      fetchImpl: counting,
+    })
+
+    expect(result.skipped).toEqual(['PLplaylist'])
+    expect(calls).toBe(0)
+  })
+
+  it('reaches videos with almost no views, which the popular chart cannot', async () => {
+    // The whole point of this pass: a brand new upload has few views however large the
+    // channel is, so the emerging and evergreen strata finally have something to draw on.
+    const newUpload = (async (input: RequestInfo | URL) => {
+      if (String(input).includes('/playlistItems')) {
+        return new Response(JSON.stringify({ items: [{ contentDetails: { videoId: 'fresh' } }] }), {
+          status: 200,
+        })
       }
       return new Response(
         JSON.stringify({
           items: [
             {
-              id: 'small',
-              snippet: { title: 'A new upload', channelId: 'UC_x', publishedAt: NOW },
-              contentDetails: { duration: 'PT5M' },
-              statistics: { viewCount: '12' },
+              id: 'fresh',
+              snippet: { title: 'Posted an hour ago', channelId: 'UCone', publishedAt: NOW },
+              contentDetails: { duration: 'PT8M' },
+              statistics: { viewCount: '7' },
             },
           ],
         }),
@@ -221,15 +275,29 @@ describe('recent uploads crawl', () => {
       )
     }) as unknown as typeof fetch
 
-    const result = await crawlRecentUploads({
+    const result = await crawlChannelUploads({
       apiKey: 'key',
-      regions: ['JP'],
-      categories: ['28'],
+      channelIds: ['UCone'],
       now: NOW,
-      fetchImpl: unpopular,
+      fetchImpl: newUpload,
     })
 
-    expect(result.items[0].viewCount).toBe(12)
+    expect(result.items[0].viewCount).toBe(7)
+  })
+
+  it('makes no hydration call when no channel yielded anything', async () => {
+    const empty = (async () =>
+      new Response(JSON.stringify({ items: [] }), { status: 200 })) as unknown as typeof fetch
+
+    const result = await crawlChannelUploads({
+      apiKey: 'key',
+      channelIds: ['UCone'],
+      now: NOW,
+      fetchImpl: empty,
+    })
+
+    expect(result.items).toEqual([])
+    expect(result.requests).toBe(1)
   })
 })
 
@@ -239,22 +307,10 @@ describe('scheduled work', () => {
     await upsertItems(
       db,
       [
-        {
-          source: 'youtube',
-          externalId: 'expired',
-          title: 't',
-          description: '',
-          tags: [],
-          channelId: 'UC',
-          channelTitle: 'C',
-          officialCategoryId: '28',
-          durationSeconds: 1,
-          publishedAt: NOW,
-          viewCount: 0,
+        catalogItem('expired', {
           metadataFetchedAt: '2026-07-01T00:00:00.000Z',
           expiresAt: '2026-07-31T00:00:00.000Z',
-          provenance: 'youtube_api',
-        },
+        }),
       ],
       NOW,
     )
@@ -304,28 +360,17 @@ describe('http surface', () => {
     const bindings = env()
     await upsertItems(
       bindings.DB,
-      Array.from({ length: 3 }, (_, index) => ({
-        source: 'youtube' as const,
-        externalId: `id-${index}`,
-        title: 't',
-        description: '',
-        tags: [],
-        channelId: 'UC',
-        channelTitle: 'C',
-        officialCategoryId: '28',
-        durationSeconds: 1,
-        publishedAt: NOW,
-        viewCount: 0,
-        metadataFetchedAt: NOW,
-        expiresAt: '2026-12-01T00:00:00.000Z',
-        provenance: 'youtube_api' as const,
-      })),
+      Array.from({ length: 3 }, (_, index) => catalogItem(`id-${index}`)),
       NOW,
     )
 
     const first = (await (
       await worker.fetch(new Request('https://catalog.test/catalog/since?limit=2'), bindings)
-    ).json()) as { items: Array<{ externalId: string }>; cursor: { updatedAt: string; externalId: string }; hasMore: boolean }
+    ).json()) as {
+      items: Array<{ externalId: string }>
+      cursor: { updatedAt: string; externalId: string }
+      hasMore: boolean
+    }
 
     expect(first.items).toHaveLength(2)
     expect(first.hasMore).toBe(true)

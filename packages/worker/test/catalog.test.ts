@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CatalogItem } from '@ypr/shared'
-import { countItems, listSince, purgeExpired, upsertItems } from '../src/catalog.js'
+import {
+  countItems,
+  listChannelsToRefresh,
+  listSince,
+  purgeExpired,
+  upsertItems,
+} from '../src/catalog.js'
 import { createTestDatabase } from './d1.js'
 
 const NOW = '2026-08-22T00:00:00.000Z'
@@ -105,6 +111,39 @@ describe('catalog storage', () => {
     const page = await listSince(db, null, 100_000)
     expect(page.items.length).toBeLessThanOrEqual(500)
     expect(page.items).toHaveLength(20)
+  })
+
+  it('offers the least recently refreshed channels first', async () => {
+    await upsertItems(db, [item({ externalId: 'old', channelId: 'UCold' })], '2026-08-01T00:00:00.000Z')
+    await upsertItems(db, [item({ externalId: 'new', channelId: 'UCnew' })], '2026-08-20T00:00:00.000Z')
+
+    // Rotation comes from the data: crawling a channel rewrites its rows with the current
+    // time, which sends it to the back of the queue.
+    expect(await listChannelsToRefresh(db, 10)).toEqual(['UCold', 'UCnew'])
+
+    await upsertItems(db, [item({ externalId: 'old', channelId: 'UCold' })], '2026-08-22T00:00:00.000Z')
+    expect(await listChannelsToRefresh(db, 10)).toEqual(['UCnew', 'UCold'])
+  })
+
+  it('ignores ids that are not channels, since their uploads playlist cannot be derived', async () => {
+    await upsertItems(
+      db,
+      [item({ externalId: 'a', channelId: 'UCreal' }), item({ externalId: 'b', channelId: '' })],
+      NOW,
+    )
+    expect(await listChannelsToRefresh(db, 10)).toEqual(['UCreal'])
+  })
+
+  it('caps how many channels one run may take on', async () => {
+    await upsertItems(
+      db,
+      Array.from({ length: 30 }, (_, index) =>
+        item({ externalId: `id-${index}`, channelId: `UC${index}` }),
+      ),
+      NOW,
+    )
+    expect(await listChannelsToRefresh(db, 5)).toHaveLength(5)
+    expect(await listChannelsToRefresh(db, 10_000)).toHaveLength(30)
   })
 
   it('survives a row whose tags are not valid JSON', async () => {

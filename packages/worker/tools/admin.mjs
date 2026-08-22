@@ -43,6 +43,10 @@ switch (command) {
     await show(await request('POST', '/admin/crawl', { authenticated: true }))
     break
 
+  case 'strata':
+    await reportStrata()
+    break
+
   default:
     console.error(`unknown command: ${command}\nexpected one of: health, catalog, crawl`)
     process.exit(2)
@@ -102,6 +106,60 @@ async function show({ status, text }, summarise) {
   console.log(`${status} ${origin}`)
   console.log(summarise ? summarise(body) : JSON.stringify(body, null, 2))
   process.exitCode = status < 400 ? 0 : 1
+}
+
+/**
+ * How the catalog splits across the popularity strata the ranker samples from.
+ *
+ * This is the measurement that says whether the second crawl pass is doing its job: a
+ * catalog built only from the popular chart is entirely "established", and the emerging
+ * and evergreen slots the ranker reserves can never be filled from it.
+ *
+ * The boundaries mirror POPULARITY_BOUNDS in packages/core/src/constants.ts. They are
+ * duplicated because this is a plain script with no build step; if they are changed there,
+ * change them here.
+ */
+async function reportStrata() {
+  const ESTABLISHED_VIEWS = 5000
+  const EMERGING_MAX_AGE_DAYS = 90
+
+  const counts = { established: 0, emerging: 0, wildcard: 0 }
+  let cursor
+  let pages = 0
+  const now = Date.now()
+
+  while (pages < 50) {
+    const query = new URLSearchParams({ limit: '500' })
+    if (cursor) {
+      query.set('updatedAt', cursor.updatedAt)
+      query.set('externalId', cursor.externalId)
+    }
+    const { status, text } = await request('GET', `/catalog/since?${query}`, { authenticated: false })
+    if (status >= 400) {
+      console.error(`${status} ${text}`)
+      process.exitCode = 1
+      return
+    }
+
+    const page = JSON.parse(text)
+    for (const item of page.items ?? []) {
+      const ageDays = (now - Date.parse(item.publishedAt)) / 86_400_000
+      if (item.viewCount >= ESTABLISHED_VIEWS) counts.established += 1
+      else if (ageDays <= EMERGING_MAX_AGE_DAYS) counts.emerging += 1
+      else counts.wildcard += 1
+    }
+
+    pages += 1
+    cursor = page.cursor
+    if (!page.hasMore) break
+  }
+
+  const total = counts.established + counts.emerging + counts.wildcard
+  console.log(`${total} item(s) across ${pages} page(s)`)
+  for (const [tier, count] of Object.entries(counts)) {
+    const share = total === 0 ? 0 : Math.round((count / total) * 100)
+    console.log(`  ${tier.padEnd(12)} ${String(count).padStart(5)}  ${share}%`)
+  }
 }
 
 function summariseCatalog(body) {

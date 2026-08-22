@@ -97,46 +97,55 @@ export async function crawlMostPopular(options: CrawlOptions): Promise<CrawlResu
   return { items: [...byId.values()], requests, errors, skipped }
 }
 
-export interface RecentCrawlOptions extends CrawlOptions {
-  /** How far back to look. */
-  days?: number
+export interface ChannelUploadsOptions {
+  apiKey: string
+  /** Channels to walk, in the order they should be visited. */
+  channelIds: string[]
+  /** Newest uploads to take from each channel. */
+  maxPerChannel?: number
+  now: string
+  fetchImpl?: typeof fetch
 }
 
 /**
- * Recent uploads, regardless of how popular they are.
+ * Recent uploads from channels already in the catalog.
  *
- * `chart=mostPopular` can only ever return established videos, so a catalog built from it
- * alone cannot fill the emerging and evergreen slots the ranker reserves — it supplies
- * exactly the popularity bias section 4.3 exists to avoid. Ordering by date instead spans
- * the whole range, and asks nothing about anyone's preferences (design addendum 2).
+ * `chart=mostPopular` can only ever return videos that are *already* popular, so a catalog
+ * built from it alone cannot fill the emerging and evergreen slots the ranker reserves —
+ * it supplies exactly the popularity bias section 4.3 exists to avoid. Walking a channel's
+ * uploads reaches its newest videos, which have few views however large the channel is
+ * (design addendum 2).
  *
- * One `search.list` call per region, which draws on a budget separate from everything else.
+ * Two properties make this the right mechanism rather than a search:
+ *
+ * - It asks nothing about anyone's preferences. The channels come from the public chart,
+ *   not from any user, so this stays safe to run on a server.
+ * - It costs one unit per channel and never touches the `search.list` budget, which is a
+ *   hundred times scarcer. `search.list?channelId=...` would do the same job and exhaust
+ *   that budget after a hundred channels.
+ *
+ * A channel's uploads playlist id is its channel id with the `UC` prefix replaced by `UU`,
+ * so no `channels.list` lookup is needed either.
  */
-export async function crawlRecentUploads(options: RecentCrawlOptions): Promise<CrawlResult> {
+export async function crawlChannelUploads(options: ChannelUploadsOptions): Promise<CrawlResult> {
   const fetchImpl = options.fetchImpl ?? fetch
-  const maxResults = Math.min(50, Math.max(1, options.maxResults ?? 25))
-  const publishedAfter = new Date(
-    Date.parse(options.now) - (options.days ?? 7) * 86_400_000,
-  ).toISOString()
+  const maxResults = Math.min(50, Math.max(1, options.maxPerChannel ?? 5))
 
   const videoIds = new Set<string>()
   const errors: string[] = []
   const skipped: string[] = []
   let requests = 0
 
-  /**
-   * No category filter. Filtering by `videoCategoryId` here returned nothing at all
-   * against the live API: category is sparsely populated in the search index, unlike in
-   * the popular chart. It is no loss — this pass exists to reach videos of every
-   * popularity level, not to cover categories, which the popular pass already does.
-   */
-  for (const region of options.regions) {
-    const url = new URL(`${API_ROOT}/search`)
-    url.searchParams.set('part', 'id')
-    url.searchParams.set('type', 'video')
-    url.searchParams.set('order', 'date')
-    url.searchParams.set('regionCode', region)
-    url.searchParams.set('publishedAfter', publishedAfter)
+  for (const channelId of options.channelIds) {
+    const playlistId = uploadsPlaylistId(channelId)
+    if (!playlistId) {
+      skipped.push(channelId)
+      continue
+    }
+
+    const url = new URL(`${API_ROOT}/playlistItems`)
+    url.searchParams.set('part', 'contentDetails')
+    url.searchParams.set('playlistId', playlistId)
     url.searchParams.set('maxResults', String(maxResults))
     url.searchParams.set('key', options.apiKey)
 
@@ -144,23 +153,26 @@ export async function crawlRecentUploads(options: RecentCrawlOptions): Promise<C
       requests += 1
       const response = await fetchImpl(url.toString(), { headers: { Accept: 'application/json' } })
       if (response.status === 404) {
-        skipped.push(region)
+        // Deleted channel, or uploads hidden. Nothing to fetch, not a fault.
+        skipped.push(channelId)
         continue
       }
       if (!response.ok) {
-        errors.push(`${region}: ${response.status} ${await describeFailure(response)}`)
+        errors.push(`${channelId}: ${response.status} ${await describeFailure(response)}`)
         continue
       }
-      const payload = (await response.json()) as { items?: Array<{ id?: { videoId?: string } }> }
+      const payload = (await response.json()) as {
+        items?: Array<{ contentDetails?: { videoId?: string } }>
+      }
       for (const entry of payload.items ?? []) {
-        if (entry.id?.videoId) videoIds.add(entry.id.videoId)
+        if (entry.contentDetails?.videoId) videoIds.add(entry.contentDetails.videoId)
       }
     } catch (error) {
-      errors.push(`${region}: ${error instanceof Error ? error.message : String(error)}`)
+      errors.push(`${channelId}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
-  // Search results carry no statistics or duration, so the metadata has to be filled in.
+  // Playlist entries carry only an id, so the metadata has to be filled in.
   const filled = await hydrate([...videoIds], options.apiKey, options.now, fetchImpl)
 
   return {
@@ -169,6 +181,12 @@ export async function crawlRecentUploads(options: RecentCrawlOptions): Promise<C
     errors: [...errors, ...filled.errors],
     skipped,
   }
+}
+
+/** `UC…` identifies the channel, `UU…` its uploads playlist. */
+export function uploadsPlaylistId(channelId: string): string | undefined {
+  if (!channelId.startsWith('UC') || channelId.length < 3) return undefined
+  return `UU${channelId.slice(2)}`
 }
 
 async function hydrate(

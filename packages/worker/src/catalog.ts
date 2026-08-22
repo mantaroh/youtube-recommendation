@@ -165,6 +165,30 @@ export async function purgeExpired(db: D1Database, now: string): Promise<number>
   return result.meta?.changes ?? 0
 }
 
+/**
+ * Channels in the catalog, least recently refreshed first.
+ *
+ * Ordering by the oldest `updated_at` among a channel's items gives rotation for free:
+ * crawling a channel rewrites its rows with the current time, which sends it to the back
+ * of the queue. No extra table, and no cursor that could drift out of step with the data.
+ */
+export async function listChannelsToRefresh(db: D1Database, limit: number): Promise<string[]> {
+  const capped = Math.min(200, Math.max(1, limit))
+  const result = await db
+    .prepare(
+      `SELECT channel_id, MIN(updated_at) AS oldest
+       FROM catalog_item
+       WHERE channel_id LIKE 'UC%'
+       GROUP BY channel_id
+       ORDER BY oldest ASC
+       LIMIT ?1`,
+    )
+    .bind(capped)
+    .all<{ channel_id: string }>()
+
+  return (result.results ?? []).map((row) => row.channel_id)
+}
+
 export async function countItems(db: D1Database): Promise<number> {
   const row = await db.prepare(`SELECT COUNT(*) AS total FROM catalog_item`).first<{ total: number }>()
   return row?.total ?? 0
