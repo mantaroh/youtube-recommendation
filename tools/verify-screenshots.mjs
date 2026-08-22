@@ -19,6 +19,11 @@ const PROFILE = join(ROOT, 'node_modules/.verify-profile')
 
 const headed = process.argv.includes('--headed')
 
+function optionValue(flag) {
+  const index = process.argv.indexOf(flag)
+  return index === -1 ? undefined : process.argv[index + 1]
+}
+
 mkdirSync(OUTPUT, { recursive: true })
 rmSync(PROFILE, { recursive: true, force: true })
 
@@ -103,6 +108,38 @@ try {
   await page.getByRole('tab', { name: 'Settings' }).click()
   await page.waitForTimeout(800)
   await page.screenshot({ path: join(OUTPUT, '7-settings.png'), fullPage: true })
+
+  // Optional: prove the deployed catalog service and the extension actually talk to each
+  // other. Off by default so the standard run stays offline.
+  const catalogUrl = optionValue('--catalog')
+  if (catalogUrl) {
+    console.log(`syncing from the shared catalog at ${catalogUrl}…`)
+    await page.getByPlaceholder('https://ypr-catalog.example.workers.dev').fill(catalogUrl)
+    await page
+      .locator('.panel', { hasText: 'Shared catalog' })
+      .getByRole('button', { name: 'Save' })
+      .click()
+    await page.waitForTimeout(500)
+
+    await page.getByRole('tab', { name: 'Status' }).click()
+    await page.getByRole('button', { name: /Fetch and embed now/i }).click()
+    await page.waitForFunction(
+      () => document.body.innerText.includes('Finished') || document.body.innerText.includes('Failed'),
+      undefined,
+      { timeout: 20 * 60 * 1000 },
+    )
+    await page.screenshot({ path: join(OUTPUT, '8-shared-catalog-sync.png'), fullPage: true })
+
+    const counts = await page.locator('.panel', { hasText: 'Local store' }).innerText()
+    console.log(counts.replace(/\n+/g, ' | '))
+
+    // The feed ranking real videos is the point of the whole exercise, so record it.
+    await page.getByRole('tab', { name: 'Feed' }).click()
+    await page.getByRole('button', { name: 'Rebuild feed' }).click()
+    await page.waitForTimeout(4000)
+    console.log(`feed cards over the shared catalog: ${await cards.count()}`)
+    await page.screenshot({ path: join(OUTPUT, '9-feed-real-catalog.png'), fullPage: true })
+  }
 
   if (errors.length > 0) {
     console.log(`\npage errors (${errors.length}):`)

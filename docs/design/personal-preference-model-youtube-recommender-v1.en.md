@@ -589,3 +589,46 @@ deployment rather than beforehand.
 Worth carrying into the next estimate: two defects were found only by running the
 extension in a real browser, and neither was reachable from unit tests. Budget for that
 step rather than treating a green test suite as completion.
+
+---
+
+## Addendum: findings from running against real data (2026-08-22 JST)
+
+The worker was deployed, given an API key, and crawled 298 real videos; the extension
+synced and embedded all of them. The mechanism works end to end. Two assumptions in this
+document did not survive contact with real embeddings and a real catalog. Both need a
+decision before the evaluation in section 9 would mean anything.
+
+### 1. Similarity has almost no usable range with a sentence encoder
+
+Section 3.2 sets `τ = 0.55`, and section 4.1 uses raw cosine directly. Measured against
+the real catalog, similarity to the single interest ran about 0.77–0.86 — with a computer
+history video at the top and an unrelated Japanese variety short near the bottom. The
+absolute value carries little information; only the ordering does.
+
+Consequences observed:
+
+- Every rating collapsed into one cluster, because everything clears `τ`.
+- `Novelty = 1 − max cos` compressed to roughly 0.14–0.23.
+- Related-lane scores bunched into 1.76–1.79 across unrelated videos.
+
+Raising `τ` is not a fix on its own: the usable band shifts with the model and with the
+content mix. The options are to calibrate similarity against the candidate distribution
+(rank or z-score before it enters the formula), or to keep raw cosine and accept that the
+clustering threshold has to be re-tuned per model. The first changes section 3; the second
+changes what section 3.4 promises about `τ` being a stable constant.
+
+### 2. The shared catalog supplies only popular content
+
+Section 4.3 reserves slots for emerging and evergreen videos so that the system does not
+manufacture the popularity bias it exists to avoid. The worker crawls `chart=mostPopular`,
+which is preference-independent — the property that makes it safe to run on a server — but
+is popularity-defined by construction. Every item it contributes is established-tier, so
+the emerging and wildcard strata can never be filled from it.
+
+The options are to change what the worker crawls (for example category browsing ordered by
+date, which is still preference-independent but costs search quota), or to narrow the
+shared catalog's stated role to cold start only and rely on subscriptions and local
+interest searches for everything the ranker actually leans on.
+
+Neither is decided here. Both are design questions rather than implementation defects.

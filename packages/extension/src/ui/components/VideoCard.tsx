@@ -65,13 +65,23 @@ export function VideoCard({ item, rating, onRate, ranked }: VideoCardProps) {
   )
 }
 
-/** Why this video is here. The score is a formula, so it can always be spelled out. */
+/**
+ * Why this video is here. The score is a formula, so it can always be spelled out.
+ *
+ * The interest is described as the *nearest* one rather than as one this video is "close
+ * to". That is the claim the number actually supports: sentence encoder similarities sit
+ * in a narrow high band, so 82% is near the floor of the range rather than a strong match,
+ * and calling it "close" would read as a much stronger statement than the model is making.
+ * The figure is shown so the claim can be checked instead of taken on faith.
+ */
 function Explanation({ ranked }: { ranked: RankedItem }) {
   const { breakdown, lane } = ranked
   const reasons: string[] = []
   if (lane === 'subscription') reasons.push('from a channel you follow')
-  if (breakdown.topClusterLabel && breakdown.long > 0) {
-    reasons.push(`close to “${breakdown.topClusterLabel}”`)
+  if (breakdown.topClusterLabel) {
+    reasons.push(
+      `nearest interest “${breakdown.topClusterLabel}” (${Math.round(breakdown.topClusterSimilarity * 100)}%)`,
+    )
   }
   if (lane === 'explore') reasons.push('further from your usual interests')
   if (breakdown.freshness > 0.6) reasons.push('recent')

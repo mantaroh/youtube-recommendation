@@ -29,6 +29,7 @@
 
   "vars": {
     "CRAWL_REGIONS": "JP,US",
-    "CRAWL_CATEGORIES": "28,27,26,24"
+    // 27 (Education) has no popular chart in these regions and returns 404.
+    "CRAWL_CATEGORIES": "28,26,24"
   }
 }

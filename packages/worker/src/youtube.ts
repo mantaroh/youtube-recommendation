@@ -43,6 +43,12 @@ export interface CrawlResult {
   items: CatalogItem[]
   requests: number
   errors: string[]
+  /**
+   * Region and category pairs that have no popular chart at all. Not failures: which
+   * combinations are charted varies by region and changes over time, so a 404 here says
+   * "nothing to fetch", not "something is broken".
+   */
+  skipped: string[]
 }
 
 export async function crawlMostPopular(options: CrawlOptions): Promise<CrawlResult> {
@@ -50,6 +56,7 @@ export async function crawlMostPopular(options: CrawlOptions): Promise<CrawlResu
   const maxResults = Math.min(50, Math.max(1, options.maxResults ?? 50))
   const byId = new Map<string, CatalogItem>()
   const errors: string[] = []
+  const skipped: string[] = []
   let requests = 0
 
   for (const region of options.regions) {
@@ -65,9 +72,14 @@ export async function crawlMostPopular(options: CrawlOptions): Promise<CrawlResu
       try {
         requests += 1
         const response = await fetchImpl(url.toString(), { headers: { Accept: 'application/json' } })
+        if (response.status === 404) {
+          // This region and category simply has no chart. Reporting it as an error every
+          // run would make a normal outcome look like a fault.
+          skipped.push(`${region}/${category}`)
+          continue
+        }
         if (!response.ok) {
-          const body = await response.text().catch(() => '')
-          errors.push(`${region}/${category}: ${response.status} ${body.slice(0, 200)}`)
+          errors.push(`${region}/${category}: ${response.status} ${await describeFailure(response)}`)
           continue
         }
         const payload = (await response.json()) as { items?: VideoResource[] }
@@ -82,7 +94,24 @@ export async function crawlMostPopular(options: CrawlOptions): Promise<CrawlResu
     }
   }
 
-  return { items: [...byId.values()], requests, errors }
+  return { items: [...byId.values()], requests, errors, skipped }
+}
+
+/**
+ * A short reason from a failed response.
+ *
+ * The raw body is a multi-line JSON document; pasting it whole into an error list buries
+ * the one sentence that says what went wrong.
+ */
+async function describeFailure(response: Response): Promise<string> {
+  const body = await response.text().catch(() => '')
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: string } }
+    if (parsed.error?.message) return parsed.error.message
+  } catch {
+    // Not JSON; fall through to the raw text.
+  }
+  return body.replace(/\s+/g, ' ').slice(0, 160)
 }
 
 function toCatalogItem(resource: VideoResource, now: string): CatalogItem | undefined {

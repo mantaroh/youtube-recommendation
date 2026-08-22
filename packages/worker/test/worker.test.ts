@@ -61,6 +61,52 @@ describe('crawl', () => {
     expect((Date.parse(item.expiresAt) - Date.parse(item.metadataFetchedAt)) / 86_400_000).toBe(30)
   })
 
+  it('treats a category with no chart as skipped rather than as a failure', async () => {
+    // Which region and category pairs are charted varies and changes; a 404 means there is
+    // nothing to fetch, and reporting it as an error every run would cry wolf.
+    const noChart = (async (input: RequestInfo | URL) => {
+      if (String(input).includes('videoCategoryId=27')) {
+        return new Response(
+          JSON.stringify({ error: { code: 404, message: 'Requested entity was not found.' } }),
+          { status: 404 },
+        )
+      }
+      return new Response(JSON.stringify(videoPayload(['a'])), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const result = await crawlMostPopular({
+      apiKey: 'key',
+      regions: ['JP'],
+      categories: ['28', '27'],
+      now: NOW,
+      fetchImpl: noChart,
+    })
+
+    expect(result.skipped).toEqual(['JP/27'])
+    expect(result.errors).toEqual([])
+    expect(result.items).toHaveLength(1)
+  })
+
+  it('reports the reason from a failure rather than the whole response body', async () => {
+    const failing = (async () =>
+      new Response(
+        JSON.stringify({
+          error: { code: 403, message: 'The request cannot be completed because you have exceeded your quota.' },
+        }),
+        { status: 403 },
+      )) as unknown as typeof fetch
+
+    const result = await crawlMostPopular({
+      apiKey: 'key',
+      regions: ['JP'],
+      categories: ['28'],
+      now: NOW,
+      fetchImpl: failing,
+    })
+
+    expect(result.errors).toEqual(['JP/28: 403 The request cannot be completed because you have exceeded your quota.'])
+  })
+
   it('records a failing region without abandoning the rest of the crawl', async () => {
     const failing = (async (input: RequestInfo | URL) => {
       if (String(input).includes('regionCode=JP')) {

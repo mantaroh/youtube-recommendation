@@ -70,13 +70,15 @@ export interface CrawlSummary {
   purged: number
   requests: number
   errors: string[]
+  /** Region and category pairs that have no popular chart. Expected, not a failure. */
+  skipped: string[]
 }
 
 export async function runCrawl(env: Env, now: string): Promise<CrawlSummary> {
   const purged = await purgeExpired(env.DB, now)
 
   if (!env.YOUTUBE_API_KEY) {
-    return { crawled: 0, stored: 0, purged, requests: 0, errors: ['YOUTUBE_API_KEY is not set'] }
+    return { crawled: 0, stored: 0, purged, requests: 0, errors: ["YOUTUBE_API_KEY is not set"], skipped: [] }
   }
 
   const crawl = await crawlMostPopular({
@@ -93,6 +95,7 @@ export async function runCrawl(env: Env, now: string): Promise<CrawlSummary> {
     purged,
     requests: crawl.requests,
     errors: crawl.errors,
+    skipped: crawl.skipped,
   }
 }
 

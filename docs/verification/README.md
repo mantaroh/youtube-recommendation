@@ -51,6 +51,47 @@ a thin catalog, the feed said "rate a few videos so the model has something to w
 — when the actual problem was that everything had already been rated and more needed
 fetching. `buildFeed` now distinguishes an empty catalog from an exhausted one.
 
+## Second run: against the deployed catalog
+
+```bash
+node tools/verify-screenshots.mjs --headed --catalog https://ypr-catalog.mantaroh.workers.dev
+```
+
+The worker was deployed with a real API key and crawled 298 videos. The extension synced
+all of them, embedded 305 items with the real encoder, and produced a 24 item feed across
+all three lanes with no page errors (`8-shared-catalog-sync.png`, `9-feed-real-catalog.png`).
+
+The mechanism works end to end. The *output* exposed two problems that no test asserts on,
+because both are questions of whether the numbers mean anything rather than whether the
+code runs.
+
+**Sentence encoder similarities sit in a narrow high band.** Across the real catalog,
+cosine similarity to the single interest ranged roughly 0.77–0.86 — and the 0.86 end was a
+computer-history video while the 0.77 end was a Japanese variety short. Absolute thresholds
+are therefore close to meaningless here, which has three consequences:
+
+- `τ = 0.55` cannot separate anything. Every rating fell into one cluster, which is why the
+  interest reads "Unix · Archive · Computer" and why there is only ever one of them.
+- `Novelty = 1 − max cos` is compressed into roughly 0.14–0.23, so the explore term barely
+  distinguishes candidates.
+- Scores bunch together: the related lane ran 1.76–1.79 across completely unrelated videos.
+
+The design assumed similarity spread over a usable range. It does not with this model
+family. Fixing it properly means calibrating similarity — ranking or standardising against
+the candidate distribution rather than comparing raw cosines to a constant — which is a
+change to section 3, not a constant to nudge.
+
+**The shared catalog is popularity-defined at source.** `chart=mostPopular` is
+preference-independent, which is what makes it safe to run on a server, but everything it
+returns is by definition already popular. Section 4.3 reserves slots for emerging and
+evergreen videos specifically to avoid manufacturing popularity bias, and the shared
+catalog cannot fill those slots: every item it supplies is established-tier. In this run
+that showed up as a related lane full of viral shorts.
+
+The interim change made here was to stop the interface overclaiming: it now names the
+*nearest* interest and shows the figure, rather than asserting a video is "close to" an
+interest on the strength of a number near the floor of its own range.
+
 ## Known limitations of this run
 
 - It runs against the fixture catalog, so the numbers are small: the subscription window
