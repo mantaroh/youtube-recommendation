@@ -92,6 +92,31 @@ The interim change made here was to stop the interface overclaiming: it now name
 *nearest* interest and shows the figure, rather than asserting a video is "close to" an
 interest on the strength of a number near the floor of its own range.
 
+## Third run: after calibration and the widened catalog
+
+Same command, against a catalog of 488 real videos. 495 items embedded locally, 24 item
+feed across all three lanes, no page errors (`9-feed-real-catalog.png`).
+
+What changed, measured rather than judged by eye:
+
+| | Before | After |
+|---|---|---|
+| Related-lane score spread | 1.76–1.79 | 1.27–2.15 |
+| Reported closeness | "82%" on everything | per item, relative to the pool |
+| Catalog split by stratum | 98% / 2% / 0% | 50% / 50% / 0% |
+
+The related lane now returns recognisably on-topic material — data centres, hardware
+benchmarks, an operating system video — where the same query previously returned viral
+shorts scored indistinguishably. Items drawn from the reserved slots say so in their
+explanation ("less watched than most candidates").
+
+`pnpm --filter @ypr/worker admin strata` reports both boundaries side by side, because the
+difference between them is the finding.
+
+The wildcard stratum stays at zero. Both crawl passes fetch recent content, so there is
+nothing older than ninety days in the shared catalog for it to draw on; evergreen material
+reaches the feed through subscriptions and local searches instead.
+
 ## Known limitations of this run
 
 - It runs against the fixture catalog, so the numbers are small: the subscription window

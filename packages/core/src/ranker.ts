@@ -18,10 +18,17 @@ import {
   PENALTY,
   POPULARITY_BOUNDS,
   POPULARITY_MIX,
+  POPULARITY_PERCENTILE,
   SUBSCRIBED_CHANNEL_BONUS,
 } from './constants.js'
 import { decayAt } from './decay.js'
-import { calibrate, calibrateSigned, similarityStats, type SimilarityStats } from './calibration.js'
+import {
+  calibrate,
+  calibrateSigned,
+  quantile,
+  similarityStats,
+  type SimilarityStats,
+} from './calibration.js'
 import { cosine } from './vector.js'
 
 /**
@@ -70,8 +77,38 @@ export function withKeySets(context: RankingContext): RankingContext {
   }
 }
 
-export function popularityTier(item: CatalogItem, now: string): PopularityTier {
-  if (item.viewCount >= POPULARITY_BOUNDS.established) return 'established'
+export interface PopularityBounds {
+  /** View count at or above which an item counts as established. */
+  establishedFloor: number
+}
+
+/**
+ * Where the popularity strata sit for this particular pool.
+ *
+ * Taken from the candidates rather than fixed, so "less watched than usual" means
+ * something whatever the catalog contains. An absolute boundary of 5,000 views put 98% of
+ * the deployed catalog into one stratum, which left the slots reserved for smaller videos
+ * unfillable — the strata cannot correct a popularity bias they cannot see
+ * (design addendum 2).
+ */
+export function computePopularityBounds(candidates: readonly Candidate[]): PopularityBounds {
+  const views = candidates.map((candidate) => candidate.item.viewCount)
+  return { establishedFloor: quantile(views, POPULARITY_PERCENTILE) }
+}
+
+/**
+ * View count decides established; age decides which of the other two.
+ *
+ * Age stays absolute because it means the same thing everywhere — a two year old video is
+ * old regardless of what else is in the pool — while a view count does not.
+ */
+export function popularityTier(
+  item: CatalogItem,
+  now: string,
+  bounds?: PopularityBounds,
+): PopularityTier {
+  const floor = bounds?.establishedFloor ?? POPULARITY_BOUNDS.established
+  if (item.viewCount >= floor) return 'established'
   const ageDays = (Date.parse(now) - Date.parse(item.publishedAt)) / 86_400_000
   return ageDays <= 90 ? 'emerging' : 'wildcard'
 }
@@ -306,6 +343,7 @@ export function assembleFeed(input: AssembleInput): RankedItem[] {
     ...withKeySets(input),
     similarityStats: input.similarityStats ?? computeSimilarityStats(pool, input.state.clusters),
   } as AssembleInput
+  const popularityBounds = computePopularityBounds(pool)
   const quotas = laneQuotas(input.discovery, input.feedSize)
   const chosen: Array<{ entry: ScoredCandidate; lane: Lane }> = []
   const taken = new Set<string>()
@@ -319,7 +357,7 @@ export function assembleFeed(input: AssembleInput): RankedItem[] {
     const scored: ScoredCandidate[] = laneCandidates.map((candidate) => ({
       candidate,
       breakdown: scoreCandidate(candidate, context),
-      tier: popularityTier(candidate.item, context.now),
+      tier: popularityTier(candidate.item, context.now, popularityBounds),
     }))
 
     const selected =

@@ -631,4 +631,48 @@ date, which is still preference-independent but costs search quota), or to narro
 shared catalog's stated role to cold start only and rely on subscriptions and local
 interest searches for everything the ranker actually leans on.
 
-Neither is decided here. Both are design questions rather than implementation defects.
+### Resolution (2026-08-22 JST)
+
+Both were addressed. The shape of the fix turned out to be the same in each case, and it
+is worth stating as a rule rather than as two coincidences:
+
+> **A constant compared against a measurement is only meaningful if the measurement's scale
+> is fixed. Neither of these scales is.**
+
+Cosine similarity depends on the embedding model. View count depends on what the catalog
+happens to contain. Both constants were replaced by a position within the distribution the
+value is drawn from.
+
+**Similarity (section 3.2, 4.1).** The clustering threshold is now derived from the ratings
+— one standard deviation above the typical similarity between two rated items — and the
+ranker maps each similarity to its position within the candidate pool before scoring.
+Novelty uses a two-sided form of the same measure, since a one-sided one cannot tell
+"further away than usual" from "as far as everything else".
+
+**Catalog (section 1.1).** `search.list` returned nothing without a `q`, so the recent-uploads
+pass instead walks the uploads playlist of channels already in the catalog: still
+preference-independent, one unit per channel, and no search budget at all.
+
+**Strata (section 4.3).** The channel pass alone did not help, because channels drawn from
+the popular chart are large and even their newest uploads pass 5,000 views within hours.
+Measured on the deployed catalog, the fixed boundary put 98% of items in one stratum; the
+relative boundary splits it 50/50, so the reserved slots can actually be filled.
+
+| Boundary | established | emerging | wildcard |
+|---|---:|---:|---:|
+| Fixed, 5,000 views | 98% | 2% | 0% |
+| Relative, median of the pool | 50% | 50% | 0% |
+
+The wildcard stratum is still empty, and honestly so: both crawl passes fetch recent
+content, so the catalog holds nothing older than ninety days for that stratum to draw on.
+Evergreen material reaches the feed through subscriptions and local interest searches
+instead. Widening the shared catalog to cover it is not attempted here.
+
+Observed effect on the feed, over the deployed catalog: scores previously bunched into
+1.76–1.79 across unrelated videos now spread across roughly 1.27–2.15, and the related lane
+returns recognisably on-topic material rather than whatever was trending.
+
+What remains unvalidated is the choice of the constants that replaced the old ones — one
+standard deviation for clustering, two for the scoring span, the median for the strata.
+They are defensible and they behave correctly on the data seen so far, but only the
+comparison in section 9 can say whether they are right.

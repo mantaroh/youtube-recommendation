@@ -5,6 +5,7 @@ import {
   laneQuotas,
   laneShares,
   mmrRerank,
+  computePopularityBounds,
   popularityTier,
   scoreCandidate,
   type Candidate,
@@ -214,6 +215,39 @@ describe('popularity strata', () => {
     expect(
       popularityTier(item({ externalId: 'c', viewCount: 100, publishedAt: addDays(NOW, -200) }), NOW),
     ).toBe('wildcard')
+  })
+
+  it('places the boundary within the pool rather than at a fixed view count', () => {
+    // Every one of these clears the absolute 5,000 boundary, which is exactly the case
+    // that collapsed the deployed catalog into a single stratum.
+    const popular = [10_000, 50_000, 200_000, 900_000].map((viewCount, index) => ({
+      item: item({ externalId: `p${index}`, viewCount }),
+    }))
+
+    const bounds = computePopularityBounds(popular)
+    expect(bounds.establishedFloor).toBeGreaterThan(5_000)
+
+    const tiers = popular.map((candidate) => popularityTier(candidate.item, NOW, bounds))
+    expect(tiers).toContain('established')
+    expect(tiers).toContain('emerging')
+  })
+
+  it('keeps age absolute, since a two year old video is old in any pool', () => {
+    const bounds = { establishedFloor: 1_000_000 }
+    expect(popularityTier(item({ externalId: 'a', viewCount: 10 }), NOW, bounds)).toBe('emerging')
+    expect(
+      popularityTier(item({ externalId: 'b', viewCount: 10, publishedAt: addDays(NOW, -400) }), NOW, bounds),
+    ).toBe('wildcard')
+  })
+
+  it('puts everything in one stratum only when the pool really is uniform', () => {
+    const identical = Array.from({ length: 5 }, (_, index) => ({
+      item: item({ externalId: `same${index}`, viewCount: 1234 }),
+    }))
+    const bounds = computePopularityBounds(identical)
+    expect(identical.every((candidate) => popularityTier(candidate.item, NOW, bounds) === 'established')).toBe(
+      true,
+    )
   })
 })
 

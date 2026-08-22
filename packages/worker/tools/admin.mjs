@@ -123,7 +123,7 @@ async function reportStrata() {
   const ESTABLISHED_VIEWS = 5000
   const EMERGING_MAX_AGE_DAYS = 90
 
-  const counts = { established: 0, emerging: 0, wildcard: 0 }
+  const items = []
   let cursor
   let pages = 0
   const now = Date.now()
@@ -142,24 +142,40 @@ async function reportStrata() {
     }
 
     const page = JSON.parse(text)
-    for (const item of page.items ?? []) {
-      const ageDays = (now - Date.parse(item.publishedAt)) / 86_400_000
-      if (item.viewCount >= ESTABLISHED_VIEWS) counts.established += 1
-      else if (ageDays <= EMERGING_MAX_AGE_DAYS) counts.emerging += 1
-      else counts.wildcard += 1
-    }
-
+    items.push(...(page.items ?? []))
     pages += 1
     cursor = page.cursor
     if (!page.hasMore) break
   }
 
-  const total = counts.established + counts.emerging + counts.wildcard
-  console.log(`${total} item(s) across ${pages} page(s)`)
-  for (const [tier, count] of Object.entries(counts)) {
-    const share = total === 0 ? 0 : Math.round((count / total) * 100)
-    console.log(`  ${tier.padEnd(12)} ${String(count).padStart(5)}  ${share}%`)
+  const sortedViews = items.map((item) => item.viewCount).sort((a, b) => a - b)
+  const median = sortedViews.length === 0 ? 0 : sortedViews[Math.floor((sortedViews.length - 1) / 2)]
+
+  const split = (floor) => {
+    const counts = { established: 0, emerging: 0, wildcard: 0 }
+    for (const item of items) {
+      const ageDays = (now - Date.parse(item.publishedAt)) / 86_400_000
+      if (item.viewCount >= floor) counts.established += 1
+      else if (ageDays <= EMERGING_MAX_AGE_DAYS) counts.emerging += 1
+      else counts.wildcard += 1
+    }
+    return counts
   }
+
+  const report = (label, floor) => {
+    const counts = split(floor)
+    console.log(`\n${label} (floor ${floor.toLocaleString()} views)`)
+    for (const [tier, count] of Object.entries(counts)) {
+      const share = items.length === 0 ? 0 : Math.round((count / items.length) * 100)
+      console.log(`  ${tier.padEnd(12)} ${String(count).padStart(5)}  ${share}%`)
+    }
+  }
+
+  console.log(`${items.length} item(s) across ${pages} page(s)`)
+  // Both, because the difference between them is the whole point: the ranker uses the
+  // relative boundary, and the absolute one shows what it would have collapsed to.
+  report('relative boundary, as the ranker uses', median)
+  report('fixed boundary, for comparison', ESTABLISHED_VIEWS)
 }
 
 function summariseCatalog(body) {

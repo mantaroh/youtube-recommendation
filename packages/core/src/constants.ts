@@ -112,3 +112,13 @@ export const MILLISECONDS_PER_DAY = 86_400_000
  * observed distribution, so it holds wherever that distribution happens to sit.
  */
 export const TAU_Z_SCORE = 1
+
+/**
+ * Share of the candidate pool, by view count, that counts as established.
+ *
+ * Relative rather than absolute for the same reason the similarity threshold is: a fixed
+ * view count means something different in every catalog. Measured against the deployed
+ * catalog, a boundary of 5,000 views put 98% of items in one stratum and left the slots
+ * reserved for less-watched videos permanently empty (design addendum 2).
+ */
+export const POPULARITY_PERCENTILE = 0.5

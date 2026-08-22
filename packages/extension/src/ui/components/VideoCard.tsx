@@ -86,6 +86,10 @@ function Explanation({ ranked }: { ranked: RankedItem }) {
   }
   if (lane === 'explore') reasons.push('further from your usual interests')
   if (breakdown.freshness > 0.6) reasons.push('recent')
+  // Only worth saying when it is not the default: these are the reserved slots that stop
+  // the feed filling up with whatever is already popular.
+  if (ranked.tier === 'emerging') reasons.push('less watched than most candidates')
+  if (ranked.tier === 'wildcard') reasons.push('little watched and not new')
 
   return (
     <div className="explain small muted">
