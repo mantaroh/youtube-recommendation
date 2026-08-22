@@ -447,3 +447,15 @@ input[type='text'] {
   color: var(--ink);
   font: inherit;
 }
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 10px;
+}
+
+.slider-row input[type='range'] {
+  flex: 1;
+  max-width: 420px;
+}

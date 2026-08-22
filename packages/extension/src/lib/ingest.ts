@@ -1,10 +1,12 @@
 import type { CatalogItem, InferenceEngine, SourceAdapter } from '@ypr/shared'
 import { itemKey } from '@ypr/shared'
 import { getDb, primaryKeyOf } from './db.js'
-import { getSetting, setSetting } from './settings.js'
+import { getSetting, setSetting, updateAppSettings } from './settings.js'
 import { embeddingTextFor } from './sources/youtube/mapper.js'
 import { resolveSource, type SourceMode } from './sources/factory.js'
 import { readLedger } from './sources/youtube/quota.js'
+import { QuotaExhaustedError } from './sources/youtube/client.js'
+import { loadPreferenceContext } from './preference.js'
 
 /**
  * Ingestion: fetch metadata, store it, embed it, and drop what has expired.
@@ -68,6 +70,9 @@ export async function runIngestion(options: IngestOptions): Promise<IngestReport
   try {
     report('Reading subscriptions')
     channelIds = await adapter.listSubscribedChannelIds()
+    // Recorded in settings so the ranker knows which channels are followed without
+    // depending on adapter-specific tables.
+    await updateAppSettings({ subscribedChannelIds: channelIds })
     report(`Fetching new uploads from ${channelIds.length} channels`)
     fetched = await adapter.listSubscriptionUpdates({
       publishedAfter,
@@ -104,6 +109,79 @@ export async function runIngestion(options: IngestOptions): Promise<IngestReport
     errors,
     quota: { units: ledger.units, search: ledger.search },
   }
+}
+
+/** Interests searched per discovery run, and queries built from each (design section 6.1). */
+const MAX_DISCOVERY_CLUSTERS = 10
+const QUERIES_PER_CLUSTER = 3
+const RESULTS_PER_QUERY = 25
+
+export interface DiscoveryReport {
+  queries: string[]
+  fetchedItems: number
+  newItems: number
+  embedded: number
+  /** True when the daily search budget ran out before every query was issued. */
+  stoppedEarly: boolean
+  errors: string[]
+}
+
+/**
+ * Looks for videos outside the subscription lane, using the user's own interests as
+ * queries.
+ *
+ * The queries are built here, on this machine, and go straight to YouTube. Routing them
+ * through a server would hand over exactly the information this design keeps local, and
+ * YouTube already knows what its own user searches for (design section 1.1).
+ */
+export async function runDiscovery(options: IngestOptions): Promise<DiscoveryReport> {
+  const now = options.now ?? (() => new Date().toISOString())
+  const report = (message: string) => options.onProgress?.(message)
+  const errors: string[] = []
+
+  let adapter = options.adapter
+  if (!adapter) adapter = (await resolveSource(now)).adapter
+
+  const { state } = await loadPreferenceContext({ now: now() })
+  const active = state.clusters
+    .filter((cluster) => cluster.activity > 0)
+    .sort((a, b) => b.activity - a.activity)
+    .slice(0, MAX_DISCOVERY_CLUSTERS)
+
+  const queries = [...new Set(active.flatMap(queriesForLabel))]
+  const collected: CatalogItem[] = []
+  let stoppedEarly = false
+
+  for (const query of queries) {
+    try {
+      report(`Searching: ${query}`)
+      collected.push(...(await adapter.search(query, { maxResults: RESULTS_PER_QUERY })))
+    } catch (error) {
+      // A spent budget is an expected outcome, not a failure: the subscription lane does
+      // not use search at all, so the feed still works.
+      if (error instanceof QuotaExhaustedError) {
+        stoppedEarly = true
+        report('Daily search budget spent; stopping discovery here.')
+        break
+      }
+      errors.push(describeError(error))
+    }
+  }
+
+  const newItems = await storeItems(collected)
+  const embedded = await embedMissing(options.engine, report)
+
+  return { queries, fetchedItems: collected.length, newItems, embedded, stoppedEarly, errors }
+}
+
+function queriesForLabel(cluster: { label: string }): string[] {
+  const terms = cluster.label
+    .split('·')
+    .map((term) => term.trim())
+    .filter(Boolean)
+  if (terms.length === 0) return []
+  // The full label finds the topic; the individual terms reach the edges of it.
+  return [terms.join(' '), ...terms.slice(0, QUERIES_PER_CLUSTER - 1)].slice(0, QUERIES_PER_CLUSTER)
 }
 
 /** Upserts catalog items, returning how many of them were previously unknown. */

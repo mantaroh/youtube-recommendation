@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getStoreStatus, runIngestion, type IngestReport } from '../../lib/ingest.js'
+import { getStoreStatus, runDiscovery, runIngestion, type IngestReport } from '../../lib/ingest.js'
 import { getEngine, subscribeToEngineStatus, type EngineStatus } from '../../lib/inference/engine.js'
 import { resolveSource } from '../../lib/sources/factory.js'
 import { readLedger, SEARCH_CALL_BUDGET, UNIT_BUDGET } from '../../lib/sources/youtube/quota.js'
@@ -42,6 +42,29 @@ export function StatusPage() {
     }
   }, [status, quota])
 
+  const discoverNow = useCallback(async () => {
+    setRunning(true)
+    setLog(['Looking for unfamiliar videos'])
+    try {
+      const inference = await getEngine()
+      const result = await runDiscovery({
+        engine: inference,
+        onProgress: (message) => setLog((lines) => [...lines, message]),
+      })
+      setLog((lines) => [
+        ...lines,
+        `${result.queries.length} queries · ${result.fetchedItems} results · ${result.newItems} new`,
+        result.stoppedEarly ? 'Stopped early: the daily search budget is spent.' : 'Finished',
+      ])
+    } catch (error) {
+      setLog((lines) => [...lines, `Failed: ${error instanceof Error ? error.message : String(error)}`])
+    } finally {
+      setRunning(false)
+      status.reload()
+      quota.reload()
+    }
+  }, [status, quota])
+
   const counts = status.value
 
   return (
@@ -62,10 +85,17 @@ export function StatusPage() {
           <button className="action" onClick={runNow} disabled={running}>
             {running ? 'Working…' : 'Fetch and embed now'}
           </button>
+          <button className="secondary" onClick={discoverNow} disabled={running}>
+            Look for unfamiliar videos
+          </button>
           <span className="muted small">
             Last run: {counts?.lastRunAt ? new Date(counts.lastRunAt).toLocaleString() : 'never'}
           </span>
         </div>
+        <p className="muted small">
+          Searching uses your interests as queries. They go straight to YouTube and are capped by the
+          daily budget below.
+        </p>
       </section>
 
       <section className="panel">
