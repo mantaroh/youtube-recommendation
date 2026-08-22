@@ -107,8 +107,8 @@ export function FeedPage() {
         <section className="panel">
           <h2>Nothing to rank yet</h2>
           <p className="muted">
-            {feed.emptyReason ?? 'Rate a few videos so the model has something to work from.'} Start on
-            the <strong>Status</strong> tab and run a fetch.
+            {feed.emptyReason ??
+              'Rate a few videos so the model has something to work from, then fetch on the Status tab.'}
           </p>
         </section>
       ) : (

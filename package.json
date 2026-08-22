@@ -13,6 +13,7 @@
     "build": "pnpm -r --if-present build"
   },
   "devDependencies": {
+    "playwright": "^1.62.1",
     "typescript": "^5.0.0",
     "vitest": "^3.0.0"
   }

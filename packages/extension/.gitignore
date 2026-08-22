@@ -1,0 +1,3 @@
+# The ONNX runtime, copied from node_modules by tools/copy-onnx-runtime.mjs at build
+# time. Tens of megabytes, and reproducible from the lockfile.
+src/public/ort/

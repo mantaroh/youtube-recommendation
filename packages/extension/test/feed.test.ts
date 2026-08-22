@@ -4,6 +4,7 @@ import { itemKey } from '@ypr/shared'
 import { buildFeed } from '../src/lib/feed.js'
 import { embedMissing, runDiscovery, runIngestion, storeItems } from '../src/lib/ingest.js'
 import { rateItem, recordImpressions } from '../src/lib/events.js'
+import { getDb } from '../src/lib/db.js'
 import { FixtureSourceAdapter, buildFixtureCatalog } from '../src/lib/sources/youtube/fixtures.js'
 import { updateAppSettings } from '../src/lib/settings.js'
 import { useFreshDb } from './helpers.js'
@@ -38,7 +39,20 @@ describe('feed', () => {
     useFreshDb()
     const feed = await buildFeed({ now: NOW })
     expect(feed.items).toEqual([])
-    expect(feed.emptyReason).toBeTruthy()
+    expect(feed.emptyReason).toMatch(/fetched/i)
+  })
+
+  it('says the catalog is exhausted rather than asking for more ratings', async () => {
+    // Rating everything is the case where "rate a few videos" would be exactly the wrong
+    // advice: the fix is to fetch more, not to rate more.
+    const everything = await getDb().items.toArray()
+    for (const item of everything) {
+      await rateItem({ source: 'youtube', externalId: item.externalId }, 4, NOW)
+    }
+
+    const feed = await buildFeed({ now: NOW })
+    expect(feed.items).toEqual([])
+    expect(feed.emptyReason).toMatch(/has been rated/i)
   })
 
   it('ranks a liked topic above one the user asked for less of', async () => {

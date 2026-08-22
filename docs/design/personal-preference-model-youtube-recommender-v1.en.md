@@ -532,11 +532,60 @@ Because this is a new repository, there is no impact on existing behavior. Exter
 
 ---
 
+## Appendix: implementation notes
+
+Where the built system differs from this document, and why. Recorded during Phases 0–6 so
+that the document stays the source of truth rather than drifting away from the code.
+
+### Decisions the design left open
+
+| Point | Resolution |
+|---|---|
+| `norm()` in section 3.5 | Long- and short-term mass are normalised against a **shared** scale (the largest long-term mass). Normalising each against its own maximum made decay invisible: a user with a single interest would see it rescaled to full strength however stale it was. A shared denominator also makes the two comparable, which a weighted sum requires. A regression test pins this down. |
+| Popularity share rounding (section 4.3) | Largest remainder. Rounding each share independently gave the minority strata zero slots on small lanes, and the back-fill then handed those slots to the popular stratum — reintroducing the bias the strata exist to prevent. |
+| Initial weights (open issue 3) | `channel 1.0, long 1.0, short 0.8, negative 1.2, explore 0.35, freshness 0.25, watch 0.0`. The negative term is heaviest so an explicit "no more of this" outweighs a merely similar positive match. |
+| Cluster identity across rebuilds | A cluster's id derives from the rating that created it (`c:<item key>`), so a user edit still refers to the same interest after a rebuild. Merges record an alias so edits made before a merge keep applying. |
+
+### Deviations from the written design
+
+| Deviation | Reason |
+|---|---|
+| Ingestion runs in the dashboard page, not the background service worker | Embedding a batch far outlives the idle timeout an MV3 service worker gets, and the worker has no GPU context. The worker only schedules and marks a refresh as due. |
+| Interest operations include `unpin`, `unmute`, `restore` and `rename` | Section 3.5 lists only the destructive half. A pin with no unpin is not an editable model. |
+| "Forget" suppresses rather than excluding events from re-clustering | Implemented as a tombstone plus a rule that rating the topic positively again revives it, which is what someone who changed their mind twice would expect. Excluding the events from clustering would require knowing membership before clustering. |
+| Time travel is a persisted "as of" view, not a destructive restore | Rebuilding at a past instant already gives the behaviour; writing that state back would add events to the present and corrupt the very history the feature depends on. Editing is disabled while viewing the past. |
+| `CatalogItem.provenance` accepts `fixture` | The fixture catalog must be impossible to mistake for API data, particularly around the 30 day TTL rule. |
+| Trials live outside the event log | They are observations about an experiment, not statements about what the user wants. Deleting them changes no preference. |
+| The Firefox build is MV2 | WXT's default for Firefox. The sources are shared; only the manifest differs. |
+| The ONNX runtime is copied into the extension at build time, and the manifest declares `wasm-unsafe-eval` | Transformers.js otherwise fetches its WebAssembly loader from a CDN, which `script-src 'self'` blocks, and the encoder silently drops to the lexical fallback. Found by running the extension in a real browser; see `docs/verification`. |
+| The worker crawls `chart=mostPopular` rather than searching | A query that depends on nobody's preferences, so running it on a server reveals nothing. It is also a `videos.list` call, so it never touches the `search.list` budget. |
+| `@wxt-dev/module-react` is not used | Its current release pulls a Vite plugin requiring a newer Vite than WXT builds on. The React plugin is wired directly instead. |
+
+### Still open
+
+- **Open issue 1 remains open.** The 2026 `search.list` quota behaviour has not been
+  confirmed against a primary source. The implementation caps itself at 60 calls per day
+  and degrades rather than failing when a budget is spent, so a different real limit
+  changes a constant rather than the design.
+- **Cluster threshold.** With the real sentence encoder, browser, operating system and
+  computer history merged into one interest at `τ = 0.55`. Plausible, but it wants tuning
+  against real ratings; `τ` is exposed as a setting for this.
+- **Worker deployment.** The worker is built, migrated and tested but not deployed.
+
 ## Turn Count
 
 | Phase | Planned turns | Actual turns |
 |---|---:|---:|
 | Design (this document) | 3 | 4 (includes English translation and consolidation into a single source of truth) |
-| Implementation Phase 0–6 | TBD | Not measured |
+| Implementation Phase 0–6 | Not estimated | 1 (a single autonomous run covering all seven phases) |
+| **Total** | — | **5** |
 
-Update this table when implementation is complete.
+The implementation ran as one uninterrupted turn because the decisions it needed were
+gathered in advance: credentials, target browser, resource approvals and the treatment of
+Phases 5 and 6 were all settled before any code was written. The one decision deliberately
+left for later is deploying the worker, which needs an account check at the moment of
+deployment rather than beforehand.
+
+Worth carrying into the next estimate: two defects were found only by running the
+extension in a real browser, and neither was reachable from unit tests. Budget for that
+step rather than treating a green test suite as completion.

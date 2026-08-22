@@ -69,6 +69,18 @@ export class TransformersInferenceEngine implements InferenceEngine {
       this.extractor = import('@huggingface/transformers').then(({ env, pipeline }) => {
         // Models are fetched from the hub and cached by the browser; nothing is bundled.
         env.allowLocalModels = false
+
+        // The ONNX runtime is loaded from inside the extension. Left to itself the library
+        // pulls its WebAssembly loader from a CDN, which `script-src 'self'` blocks in an
+        // MV3 extension — the encoder then fails and the lexical fallback takes over.
+        const wasm = env.backends?.onnx?.wasm
+        if (wasm) {
+          wasm.wasmPaths = runtimeUrl('/ort/')
+          // Threads need SharedArrayBuffer, which needs cross-origin isolation that an
+          // extension page does not have.
+          wasm.numThreads = 1
+        }
+
         return pipeline('feature-extraction', this.modelId, {
           dtype: 'q8',
           device: 'auto',
@@ -78,4 +90,11 @@ export class TransformersInferenceEngine implements InferenceEngine {
     }
     return this.extractor
   }
+}
+
+/** Extension-relative URL, falling back to a plain path outside an extension context. */
+function runtimeUrl(path: string): string {
+  const runtime = (globalThis as { chrome?: { runtime?: { getURL?: (path: string) => string } } }).chrome
+    ?.runtime
+  return runtime?.getURL ? runtime.getURL(path) : path
 }

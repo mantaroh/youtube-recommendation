@@ -52,6 +52,27 @@ export async function buildFeed(options: { now?: string; feedSize?: number } = {
     subscribedChannelIds,
   })
 
+  const candidateCount =
+    (candidates.subscription?.length ?? 0) +
+    (candidates.related?.length ?? 0) +
+    (candidates.explore?.length ?? 0)
+
+  if (candidateCount === 0) {
+    // Distinguishing this from an empty catalog matters: the two need opposite actions,
+    // and telling someone to rate more when they have already rated everything is worse
+    // than saying nothing.
+    return {
+      items: [],
+      state,
+      quotas,
+      asOf,
+      emptyReason:
+        state.ratedKeys.length >= items.size
+          ? 'Everything in the local catalog has been rated. Fetch new uploads or look for unfamiliar videos on the Status tab.'
+          : 'No candidates matched. Try moving the slider toward discovery, or fetch more videos.',
+    }
+  }
+
   const ranked = assembleFeed({
     state,
     now: asOf ?? now,

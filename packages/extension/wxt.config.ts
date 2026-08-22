@@ -10,12 +10,15 @@ import { defineConfig } from 'wxt'
  */
 export default defineConfig({
   srcDir: 'src',
+  // Holds the ONNX runtime copied in by tools/copy-onnx-runtime.mjs, which has to be
+  // served from inside the extension rather than from a CDN (see inference/transformers).
+  publicDir: 'src/public',
   // The React plugin is wired directly rather than through @wxt-dev/module-react, whose
   // current release pulls in a plugin version that requires a newer Vite than WXT uses.
   vite: () => ({
     plugins: [react()],
   }),
-  manifest: {
+  manifest: ({ manifestVersion }) => ({
     name: 'Personal Preference Recommender',
     description:
       'A recommendation profile you own: ratings, interest decay and ranking all stay on this machine.',
@@ -31,6 +34,24 @@ export default defineConfig({
     action: {
       default_title: 'Open my feed',
     },
+
+    /**
+     * The embedding model runs as WebAssembly, which the default extension policy refuses
+     * to compile. Without `wasm-unsafe-eval` the sentence encoder cannot start at all and
+     * the system silently drops to the lexical fallback.
+     *
+     * This does not loosen where code may come from: `script-src 'self'` still stands, and
+     * the runtime is served from inside the extension rather than from a CDN.
+     */
+    ...(manifestVersion === 3
+      ? {
+          content_security_policy: {
+            extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+          },
+        }
+      : {
+          content_security_policy: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+        }),
     browser_specific_settings: {
       gecko: {
         id: 'personal-preference-recommender@local',
@@ -40,5 +61,5 @@ export default defineConfig({
         data_collection_permissions: { required: ['none'] },
       },
     },
-  },
+  }),
 })
