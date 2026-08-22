@@ -161,6 +161,13 @@ export interface InterestCluster {
   massShort: number
   /** Magnitude of negative ratings with `H_neg` decay. */
   massNegative: number
+  /**
+   * The three masses rescaled to [0, 1] across all clusters. The ranker uses these
+   * directly, so it never has to know how many clusters there are or how heavy they get.
+   */
+  normalisedLong: number
+  normalisedShort: number
+  normalisedNegative: number
   /** User-set strength in [0, 1], or null when unset. */
   explicitStrength: number | null
   pinned: boolean

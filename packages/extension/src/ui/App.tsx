@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { FeedPage } from './pages/FeedPage.js'
+import { InterestsPage } from './pages/InterestsPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
 import { StatusPage } from './pages/StatusPage.js'
 
@@ -39,17 +40,9 @@ export function App() {
 
       {tab === 'status' ? <StatusPage /> : null}
       {tab === 'feed' ? <FeedPage /> : null}
-      {tab === 'interests' ? <Placeholder name="Interests" /> : null}
+      {tab === 'interests' ? <InterestsPage /> : null}
       {tab === 'settings' ? <SettingsPage /> : null}
     </div>
   )
 }
 
-function Placeholder({ name }: { name: string }) {
-  return (
-    <section className="panel">
-      <h2>{name}</h2>
-      <p className="muted">Not built yet.</p>
-    </section>
-  )
-}
