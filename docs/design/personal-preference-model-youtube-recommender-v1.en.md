@@ -1,8 +1,8 @@
 # Personal Preference Model / YouTube Recommender V1 Design Document
 
 - Created: 2026-08-22 (JST)
-- Status: Awaiting review (not approved / implementation not started)
-- Target repository: `youtube-recommendation` (new repository with no commits)
+- Status: Approved and implemented, Phases 0–6 (2026-08-22 JST). Where the build departs from this document, see the implementation notes appendix.
+- Target repository: `youtube-recommendation`
 - Source of truth: this document. All design changes are made here first; any derived material (translations, review renderings) follows it.
 
 ---
@@ -570,7 +570,7 @@ that the document stays the source of truth rather than drifting away from the c
 - **Cluster threshold.** With the real sentence encoder, browser, operating system and
   computer history merged into one interest at `τ = 0.55`. Plausible, but it wants tuning
   against real ratings; `τ` is exposed as a setting for this.
-- **Worker deployment.** The worker is built, migrated and tested but not deployed.
+- **Worker secrets.** The worker is deployed and migrated, but `YOUTUBE_API_KEY` and `ADMIN_TOKEN` are not set, so the scheduled run only sweeps expired rows and the catalog stays empty until they are.
 
 ## Turn Count
 

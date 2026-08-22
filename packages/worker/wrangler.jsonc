@@ -11,8 +11,8 @@
     {
       "binding": "DB",
       "database_name": "catalog",
-      // Filled in by `wrangler d1 create catalog` before the first deploy.
-      "database_id": "REPLACE_WITH_DATABASE_ID",
+      // Created by `wrangler d1 create catalog` in the APAC region.
+      "database_id": "4fb1fd09-19d9-4066-a94c-abd868aaa77d",
       "migrations_dir": "migrations"
     }
   ],
