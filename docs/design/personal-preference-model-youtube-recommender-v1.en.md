@@ -570,7 +570,7 @@ that the document stays the source of truth rather than drifting away from the c
 - **Cluster threshold.** With the real sentence encoder, browser, operating system and
   computer history merged into one interest at `τ = 0.55`. Plausible, but it wants tuning
   against real ratings; `τ` is exposed as a setting for this.
-- **Worker secrets.** The worker is deployed and migrated, but `YOUTUBE_API_KEY` and `ADMIN_TOKEN` are not set, so the scheduled run only sweeps expired rows and the catalog stays empty until they are.
+- **Worker API key.** The worker is deployed with `ADMIN_TOKEN` set, but `YOUTUBE_API_KEY` is not: that one has to come from a Google Cloud project rather than being generated. Until it exists the scheduled run only sweeps expired rows and the catalog stays empty.
 
 ## Turn Count
 

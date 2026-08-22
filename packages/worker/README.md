@@ -28,18 +28,50 @@ the same public catalog and from holding an API key.
 
 ## Secrets
 
-Neither secret is set yet. Until `YOUTUBE_API_KEY` exists the scheduled run only sweeps
-expired rows, which is a safe state to be deployed in — the catalog simply stays empty.
+### ADMIN_TOKEN — set
 
-Set them yourself so the values never pass through a chat log:
+Generated locally and held in `packages/worker/.admin-token`, which is git-ignored.
+Cloudflare cannot read a secret back, so **that file is the only copy**: lose it and the
+token has to be regenerated and re-set.
+
+To rotate it:
 
 ```bash
 cd packages/worker
-npx wrangler secret put YOUTUBE_API_KEY   # a YouTube Data API v3 key
-npx wrangler secret put ADMIN_TOKEN       # any long random string
+pnpm token -- --force                          # writes a new .admin-token
+npx wrangler secret put ADMIN_TOKEN < .admin-token
 ```
 
-With `ADMIN_TOKEN` unset, `/admin/crawl` refuses every request rather than falling open.
+With `ADMIN_TOKEN` unset the admin route refuses every request rather than falling open.
+
+### YOUTUBE_API_KEY — not set
+
+This one cannot be generated: it comes from a Google Cloud project with the YouTube Data
+API v3 enabled. Until it exists the scheduled run only sweeps expired rows, which is a
+safe state to be deployed in — the catalog simply stays empty.
+
+```bash
+npx wrangler secret put YOUTUBE_API_KEY
+```
+
+Set it yourself so the value never passes through a log.
+
+## Using the token
+
+`tools/admin.mjs` reads the token from disk and sends it in an `Authorization` header. It
+is never printed and never passed as an argument, so it stays out of shell history and
+process listings.
+
+```bash
+cd packages/worker
+pnpm admin health              # liveness and item count (no token needed)
+pnpm admin catalog -- --limit 5
+pnpm admin crawl               # authenticated: triggers a crawl now
+```
+
+Both `--url <origin>` and `--token <path>` are accepted, so a second deployment or a
+token kept elsewhere needs no code change. A token that does not match the deployed
+secret produces a `401` and instructions rather than a stack trace.
 
 ## Cost
 

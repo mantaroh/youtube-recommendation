@@ -9,6 +9,8 @@
     "deploy": "wrangler deploy",
     "migrate:local": "wrangler d1 migrations apply catalog --local",
     "migrate:remote": "wrangler d1 migrations apply catalog --remote",
+    "token": "node tools/generate-admin-token.mjs",
+    "admin": "node tools/admin.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
