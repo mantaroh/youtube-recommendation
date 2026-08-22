@@ -32,9 +32,30 @@ export default defineBackground(() => {
       void browser.action.setBadgeText({ text: '' })
       void browser.action.setTitle({ title: 'Open my feed' })
     }
+    if (isMessage(message, 'watch-progress')) {
+      // Appending one event is cheap enough for a worker that may be torn down shortly.
+      void handleWatchProgress(message as WatchProgressMessage)
+    }
     return undefined
   })
 })
+
+interface WatchProgressMessage {
+  type: 'watch-progress'
+  videoId: string
+  watchedSeconds: number
+  durationSeconds: number
+}
+
+async function handleWatchProgress(message: WatchProgressMessage): Promise<void> {
+  const { recordWatch } = await import('../lib/events.js')
+  await recordWatch(
+    { source: 'youtube', externalId: message.videoId },
+    message.watchedSeconds,
+    message.durationSeconds,
+    new Date().toISOString(),
+  )
+}
 
 async function openDashboard(): Promise<void> {
   const url = browser.runtime.getURL('/dashboard.html')

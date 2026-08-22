@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { FeedPage } from './pages/FeedPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
 import { StatusPage } from './pages/StatusPage.js'
 
@@ -12,7 +13,7 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id']
 
 export function App() {
-  const [tab, setTab] = useState<TabId>('status')
+  const [tab, setTab] = useState<TabId>('feed')
 
   return (
     <div className="shell">
@@ -37,7 +38,7 @@ export function App() {
       </nav>
 
       {tab === 'status' ? <StatusPage /> : null}
-      {tab === 'feed' ? <Placeholder name="Feed" /> : null}
+      {tab === 'feed' ? <FeedPage /> : null}
       {tab === 'interests' ? <Placeholder name="Interests" /> : null}
       {tab === 'settings' ? <SettingsPage /> : null}
     </div>

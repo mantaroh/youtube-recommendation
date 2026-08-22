@@ -270,3 +270,143 @@ code.inline {
   margin: 12px 0;
   font-size: 14px;
 }
+
+/* --- feed cards ------------------------------------------------------- */
+
+.cards {
+  display: grid;
+  gap: 14px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+
+.card-head h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.card-meta {
+  margin-bottom: 10px;
+}
+
+.explain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.lane-tag {
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--line);
+  text-transform: uppercase;
+}
+
+.lane-tag.subscription {
+  color: var(--positive);
+  border-color: var(--positive);
+}
+
+.lane-tag.related {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.lane-tag.explore {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.explain .score {
+  font-variant-numeric: tabular-nums;
+}
+
+.player {
+  position: relative;
+  padding-top: 56.25%;
+  margin: 10px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+
+.player iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* --- rating ----------------------------------------------------------- */
+
+.rating {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.rating-question {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.rating-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stars {
+  display: flex;
+  gap: 2px;
+}
+
+button.star {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  padding: 2px;
+  color: var(--muted);
+}
+
+button.star.filled {
+  color: var(--accent);
+}
+
+button.rating-none {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+button.rating-none.chosen {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.rating-label {
+  font-size: 13px;
+}
