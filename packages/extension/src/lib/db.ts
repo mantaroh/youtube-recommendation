@@ -43,6 +43,23 @@ export interface ChannelRow {
   fetchedAt: string
 }
 
+/**
+ * One recorded list from one recommender on one day (design section 9).
+ *
+ * Trials are observations about an experiment, not statements about what the user wants,
+ * so they live outside the event log: deleting them changes no preference.
+ */
+export interface TrialRow {
+  /** `${date}:${arm}`, so a day cannot be recorded twice for the same arm. */
+  id: string
+  /** JST calendar day. */
+  date: string
+  arm: 'own' | 'youtube'
+  /** Item keys in the order they were presented. */
+  itemKeys: string[]
+  recordedAt: string
+}
+
 /** Compound primary key shared by every content-keyed table. */
 export type ItemPrimaryKey = [string, string]
 
@@ -60,9 +77,21 @@ export class PreferenceDatabase extends Dexie {
   snapshots!: Table<SnapshotRow, number>
   settings!: Table<SettingRow, string>
   channels!: Table<ChannelRow, string>
+  trials!: Table<TrialRow, string>
 
   constructor(name = 'preference-store') {
     super(name)
+    this.version(2).stores({
+      events: '++seq, ts, type, [source+externalId]',
+      items: '[source+externalId], channelId, publishedAt, expiresAt',
+      embeddings: '[source+externalId], modelId',
+      ratings: '[source+externalId], ratedAt',
+      clusters: 'id, updatedAt',
+      snapshots: 'atSeq',
+      settings: 'key',
+      channels: 'channelId, subscribed',
+      trials: 'id, date, arm',
+    })
     this.version(1).stores({
       events: '++seq, ts, type, [source+externalId]',
       items: '[source+externalId], channelId, publishedAt, expiresAt',

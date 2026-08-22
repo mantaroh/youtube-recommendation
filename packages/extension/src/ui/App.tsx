@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { FeedPage } from './pages/FeedPage.js'
+import { EvaluationPage } from './pages/EvaluationPage.js'
 import { InterestsPage } from './pages/InterestsPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
 import { StatusPage } from './pages/StatusPage.js'
@@ -7,6 +8,7 @@ import { StatusPage } from './pages/StatusPage.js'
 const TABS = [
   { id: 'feed', label: 'Feed' },
   { id: 'interests', label: 'Interests' },
+  { id: 'evaluation', label: 'Evaluation' },
   { id: 'settings', label: 'Settings' },
   { id: 'status', label: 'Status' },
 ] as const
@@ -41,6 +43,7 @@ export function App() {
       {tab === 'status' ? <StatusPage /> : null}
       {tab === 'feed' ? <FeedPage /> : null}
       {tab === 'interests' ? <InterestsPage /> : null}
+      {tab === 'evaluation' ? <EvaluationPage /> : null}
       {tab === 'settings' ? <SettingsPage /> : null}
     </div>
   )

@@ -36,9 +36,26 @@ export default defineBackground(() => {
       // Appending one event is cheap enough for a worker that may be torn down shortly.
       void handleWatchProgress(message as WatchProgressMessage)
     }
+    if (isMessage(message, 'home-feed')) {
+      void handleHomeFeed(message as HomeFeedMessage)
+    }
     return undefined
   })
 })
+
+interface HomeFeedMessage {
+  type: 'home-feed'
+  videoIds: string[]
+}
+
+/**
+ * Stores YouTube's own recommendations as the comparison arm. Only ids are kept here;
+ * metadata is fetched later, on request, so browsing never triggers an API call.
+ */
+async function handleHomeFeed(message: HomeFeedMessage): Promise<void> {
+  const { keysForVideoIds, recordTrial } = await import('../lib/evaluation.js')
+  await recordTrial('youtube', keysForVideoIds(message.videoIds))
+}
 
 interface WatchProgressMessage {
   type: 'watch-progress'
