@@ -1,0 +1,89 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "personal-recommender",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The SPA and the API are one deployment (design section 5). Static assets are
+  // served first, except under `/api`, which the Worker has to see before the asset
+  // router decides an unknown path is a client-side route.
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // The hostname this is actually used at. Wrangler creates the DNS record and the
+  // certificate; Cloudflare Access has to be pointed at this name separately, and until
+  // it is, `/api` refuses every request for want of an assertion rather than serving it.
+  "routes": [
+    {
+      "pattern": "yt.mantaroh.com",
+      "custom_domain": true
+    }
+  ],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "catalog",
+      // Created by `wrangler d1 create catalog` in the APAC region. The name predates
+      // this design, when the database held only a public catalog; it now holds the
+      // ratings as well, and renaming it would mean losing them.
+      "database_id": "4fb1fd09-19d9-4066-a94c-abd868aaa77d",
+      "migrations_dir": "../../migrations"
+    }
+  ],
+
+  // Exports and dated backups (design section 46).
+  "r2_buckets": [
+    {
+      "binding": "BACKUPS",
+      "bucket_name": "personal-recommender-backups"
+    }
+  ],
+
+  // Design section 41. One handler dispatches on the hour; see worker/scheduled.
+  //
+  // 00:00 subscriptions refresh
+  // 06:00 interest-based discovery, then scoring
+  // 12:00 subscriptions refresh
+  // 18:00 Runpod job reconciliation, and on Sunday the retrain check and backup
+  "triggers": {
+    "crons": ["0 0,6,12,18 * * *"]
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    // Extra regions for the popularity chart, on top of the region in the profile's
+    // settings, which is always asked first. One quota unit per region and category.
+    "CRAWL_REGIONS": "JP,US",
+    // 27 (Education) has no popular chart in these regions and returns 404.
+    "CRAWL_CATEGORIES": "28,26,24",
+
+    // 40 channels x 2 runs a day = 80 units, against an allowance of 10,000.
+    "CRAWL_CHANNELS_PER_RUN": "40",
+    "CRAWL_UPLOADS_PER_CHANNEL": "5",
+
+    // Of an allowance of 100 search calls a day (design section 42). The rest is left
+    // for manual searching and for a second run on a day when the first found nothing.
+    "DISCOVERY_SEARCH_BUDGET": "30"
+  }
+
+  // Secrets, set with `wrangler secret put` (design section 43):
+  //   YOUTUBE_API_KEY
+  //   GOOGLE_CLIENT_ID
+  //   GOOGLE_CLIENT_SECRET
+  //   OAUTH_ENCRYPTION_KEY      base64 of 32 random bytes
+  //   OAUTH_REDIRECT_URI        https://<host>/api/auth/youtube/callback
+  //   RUNPOD_API_KEY
+  //   RUNPOD_ENDPOINT_ID
+  //   ACCESS_TEAM_DOMAIN        <team>.cloudflareaccess.com
+  //   ACCESS_AUD                the Access application audience tag
+  //   ACCESS_ALLOWED_EMAILS     comma separated
+}

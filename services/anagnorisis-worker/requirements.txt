@@ -1,0 +1,3 @@
+# The Runpod serverless SDK. Everything else comes from Anagnorisis, which the
+# Dockerfile installs from source so that its own pinned torch and transformers apply.
+runpod>=1.7.0

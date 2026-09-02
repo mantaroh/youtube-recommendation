@@ -1,16 +1,19 @@
 {
-  "name": "youtube-recommendation",
+  "name": "personal-recommender",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Platform-independent personal preference model, with YouTube as the first source",
+  "description": "A recommendation profile you own: Cloudflare for the feed, Runpod for the model, YouTube for the videos",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "build": "pnpm -r --if-present build"
+    "build": "pnpm -r --if-present build",
+    "dev": "pnpm --filter @ypr/web dev",
+    "deploy": "pnpm --filter @ypr/web deploy",
+    "verify": "node tools/verify-screenshots.mjs"
   },
   "devDependencies": {
     "playwright": "^1.62.1",

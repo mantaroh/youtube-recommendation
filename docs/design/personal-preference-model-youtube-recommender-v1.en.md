@@ -1,3 +1,15 @@
+> **Superseded.** This design put the preference model in a browser extension and kept
+> ratings on one machine. The system described here no longer exists: see
+> [`personal-recommender-v2.ja.md`](personal-recommender-v2.ja.md) for what replaced it,
+> and [`implementation-notes.ja.md`](implementation-notes.ja.md) for what that
+> implementation decided.
+>
+> It is kept because it is the record of a set of arguments — why ratings ask "how much
+> more of this" rather than "was this good", why interests are a set rather than a
+> vector, why popularity decides a stratum rather than a score — that the replacement
+> inherited rather than reconsidered. The conclusion it reached about *where* the model
+> should run is the part that changed.
+
 # Personal Preference Model / YouTube Recommender V1 Design Document
 
 - Created: 2026-08-22 (JST)

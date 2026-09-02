@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Personal Recommender 設計レビュー</title>
+<style>
+  /*
+   * レビュー用のレイアウト。内容は隣の Markdown 2 本
+   * (personal-recommender-v2.ja.md / implementation-notes.ja.md) と同じで、
+   * 判断が必要な箇所を上に、根拠を下に置いただけ。数値は Markdown 側が正。
+   */
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --surface: #f6f7f9;
+    --surface-2: #eef1f5;
+    --border: #dde2e8;
+    --text: #14171a;
+    --muted: #59636e;
+    --accent: #2f6feb;
+    --warn: #a8620f;
+    --danger: #b4271f;
+    --ok: #0f7a5c;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a; --surface: #1c2025; --surface-2: #23282e; --border: #2e343b;
+      --text: #eef1f4; --muted: #9aa4af; --accent: #6d9bf1; --warn: #e0a35c;
+      --danger: #f08a84; --ok: #5fc9a3;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); line-height: 1.7;
+    font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+
+  header.masthead { border-bottom: 2px solid var(--text); padding-bottom: 1.25rem; margin-bottom: 2rem; }
+  header.masthead h1 { font-size: 1.75rem; margin: 0 0 .4rem; letter-spacing: -.01em; }
+  header.masthead p { color: var(--muted); margin: 0; font-size: .95rem; }
+  header.masthead .sources { margin-top: .9rem; font-size: .85rem; font-family: var(--mono); color: var(--muted); }
+  header.masthead .sources a { color: var(--accent); }
+
+  h2 {
+    font-size: 1.15rem; margin: 2.75rem 0 .5rem; padding-bottom: .35rem;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: .98rem; margin: 1.75rem 0 .4rem; }
+  p { margin: .6rem 0; }
+  .lede { color: var(--muted); font-size: .92rem; margin-top: 0; }
+
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .9rem; }
+  th, td { border-bottom: 1px solid var(--border); padding: .5rem .65rem; text-align: left; vertical-align: top; }
+  th { background: var(--surface); font-weight: 650; color: var(--muted); font-size: .82rem; }
+  td code, p code, li code { font-family: var(--mono); font-size: .86em; background: var(--surface-2); padding: .05rem .3rem; border-radius: 3px; }
+
+  pre {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: .9rem 1rem; overflow-x: auto; font-family: var(--mono);
+    font-size: .82rem; line-height: 1.5; margin: 1rem 0;
+  }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .85rem; margin: 1.25rem 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: .85rem 1rem; }
+  .card h4 { margin: 0 0 .3rem; font-size: .88rem; }
+  .card p { margin: 0; font-size: .84rem; color: var(--muted); }
+
+  .decision { border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; padding: .85rem 1.1rem; margin: 1rem 0; }
+  .decision > .label { font-size: .74rem; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  .decision.deviation { border-left-color: var(--warn); }
+  .decision.deviation > .label { color: var(--warn); }
+  .decision h3 { margin: .2rem 0 .35rem; font-size: .95rem; }
+  .decision p { margin: .35rem 0 0; font-size: .89rem; }
+  .decision p.because { color: var(--muted); }
+
+  .pill { display: inline-block; font-size: .74rem; font-weight: 650; padding: .08rem .5rem; border-radius: 999px; }
+  .pill.keep { background: rgba(15,122,92,.14); color: var(--ok); }
+  .pill.drop { background: rgba(180,39,31,.13); color: var(--danger); }
+  .pill.new  { background: rgba(47,111,235,.13); color: var(--accent); }
+
+  ul { margin: .5rem 0; padding-left: 1.25rem; }
+  li { margin: .25rem 0; font-size: .92rem; }
+
+  .figure-note { color: var(--muted); font-size: .82rem; margin-top: -.4rem; }
+  footer { margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .84rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Personal Recommender 設計レビュー</h1>
+  <p>YouTube の推薦に依存せず、自分が管理する評価履歴からフィードを組み立てる個人向けシステム。</p>
+  <div class="sources">
+    正: <a href="personal-recommender-v2.ja.md">personal-recommender-v2.ja.md</a> ／
+    <a href="implementation-notes.ja.md">implementation-notes.ja.md</a><br />
+    このページはレビュー用のレイアウトで、内容は上記 2 本と同じ。
+  </div>
+</header>
+
+<h2>1. 何を作ったか</h2>
+<p class="lede">3 つの場所に責務を分け、GPU をリクエスト経路から外した構成。</p>
+
+<pre>Cloudflare   どんな動画があるか、自分が何を評価したかを知っている。常時稼働
+Runpod       ある動画を自分が何点と付けそうかを予測する。それ以外は寝ている
+YouTube      動画を持っている</pre>
+
+<p>Cloudflare は起きたままでもコストがかからず、GPU は暖まっている分だけ課金される。だから
+リクエストに答える必要があるものはすべて Cloudflare に置き、GPU は後回しにできる仕事
+——学習と事前スコアリング——のためだけに起こす。</p>
+
+<div class="decision">
+  <span class="label">最重要の帰結</span>
+  <h3>フィード生成中に GPU を呼ばない（設計書 §33）</h3>
+  <p>フィードは事前に計算されたスコアを読むだけ。Runpod が落ちていても、寝ていても、
+     まだ一度も設定されていなくても、アプリは動く。学習が止まるだけ（§49）。</p>
+</div>
+
+<h2>2. 前バージョンからの変更</h2>
+
+<table>
+  <thead><tr><th>観点</th><th>旧</th><th>新</th></tr></thead>
+  <tbody>
+    <tr><td>配信形態</td><td>ブラウザ拡張（WXT）</td><td>Cloudflare 上の React SPA + Worker API、同一デプロイ</td></tr>
+    <tr><td>評価履歴の置き場</td><td>ローカル IndexedDB</td><td>Cloudflare D1</td></tr>
+    <tr><td>推論</td><td>ブラウザ内 transformers.js</td><td>Runpod 上の Anagnorisis</td></tr>
+    <tr><td>認証</td><td>拡張から直接 OAuth</td><td>Cloudflare Access + Worker が暗号化トークンを保持</td></tr>
+  </tbody>
+</table>
+
+<p>
+  <span class="pill drop">削除</span> <code>packages/extension</code>（拡張一式）、
+  <code>packages/core</code>（ローカル推薦モデル）<br />
+  <span class="pill new">新規</span> <code>apps/web</code>、<code>services/anagnorisis-worker</code>、
+  <code>migrations/</code><br />
+  <span class="pill keep">継続</span> <code>packages/domain</code>（旧 shared を整理）、YouTube クライアント、
+  クロール済み D1 データ
+</p>
+
+<div class="decision deviation">
+  <span class="label">確認しておきたい前提</span>
+  <h3>信頼境界が反転している</h3>
+  <p>旧設計は「嗜好データは 1 台のマシンから出さない」を最重要原則にしていた。新設計では
+     評価履歴が D1 に載り、タイトル・説明文が Runpod に渡る。</p>
+  <p class="because">担保は §43（Access による全体保護と許可リスト）と §44（送信情報の最小化）。
+     OAuth トークン・Access の身元・メールアドレス・Cookie・IP は GPU 側に一切渡さない。</p>
+</div>
+
+<h2>3. スコアリング</h2>
+<p class="lede">モデル呼び出しではなく式。同じ入力に同じ答えを返し、実行コストがゼロで、全項目を言葉で説明できる。</p>
+
+<pre>final_score = 0.65 × preference_score      ← GPU が事前生成する唯一の項
+            + subscription_bonus
+            + freshness_bonus
+            + explicit_interest_bonus
+            + exploration_bonus
+            − seen_penalty
+            − muted_interest_penalty</pre>
+<p class="figure-note">各項は個別に保持され、そのまま「なぜこれが出たか」パネルの材料になる（§39）。LLM は使わない。</p>
+
+<div class="cards">
+  <div class="card"><h4>Subscription</h4><p>登録チャンネルの新着。最優先。1 チャンネル 1 クォータ単位</p></div>
+  <div class="card"><h4>Related</h4><p>モデルが採点済みの領域。自信を持って語れる範囲</p></div>
+  <div class="card"><h4>Explore</h4><p>モデルが何も知らない領域。予測値なし</p></div>
+</div>
+<p class="figure-note">50 件フィードなら 25 / 15 / 10。レーンごとに別プールから選ぶので、
+「Anagnorisis が予測しやすい動画だけがフィードを占領する」ことが起きない（§34）。</p>
+
+<h2>4. 設計書が触れていなかったので決めたこと</h2>
+
+<div class="decision">
+  <span class="label">決定</span>
+  <h3>学習は「現在の評価」で行う</h3>
+  <p>§11 はイベントを消さないと定め、同時に最新評価を現在値とすると書いている。学習には現在値だけを使う。</p>
+  <p class="because">全イベントを渡すと、ユーザーがすでに置き換えた評価をモデルが学ぶ。
+     ログには両方残るので、興味の変化を分析するという §11 の目的は損なわれない。</p>
+</div>
+
+<div class="decision">
+  <span class="label">決定</span>
+  <h3>学習ジョブの冪等キーにモデル版番号を含めない</h3>
+  <p>モデル版は<strong>出力の名前</strong>であって入力ではない。</p>
+  <p class="because">含めると 1 回目で版番号が繰り上がるため 2 回目のハッシュが必ず変わり、
+     「評価が増えていないのに再学習を押した」というまさに検出したいケースを一度も検出できない。</p>
+</div>
+
+<div class="decision">
+  <span class="label">決定</span>
+  <h3>未採点の動画には候補プールの平均を与える</h3>
+  <p>固定値 5.0 ではなく、そのプールで実際に採点された動画の平均。</p>
+  <p class="because">評価が全体に辛いか甘いかで、固定値はプール全体の上にも下にも来る。上なら未採点が
+     フィードを占領し、下なら永久に出てこない。</p>
+</div>
+
+<div class="decision">
+  <span class="label">決定</span>
+  <h3><code>impressions</code> を <code>rating_events</code> と分ける</h3>
+  <p>§33 の <code>seen_penalty</code> の材料。設計書にテーブルの記載がない。</p>
+  <p class="because">「表示した」と「評価した」は別の事実。同じテーブルに寄せると、
+     スクロールで通り過ぎただけの動画が「見たくない」という宣言と区別できなくなる。</p>
+</div>
+
+<p>他に <code>oauth_tokens</code> / <code>oauth_states</code> / <code>api_quota_usage</code> /
+<code>settings</code> を追加。いずれも §16・§42・§38・§45 が要求する動作にテーブルが割り当てられていなかったもの。</p>
+
+<h2>5. 設計書どおりにできなかったこと</h2>
+
+<div class="decision deviation">
+  <span class="label">乖離</span>
+  <h3>Network Volume のレイアウト（§27）</h3>
+  <p>設計書は <code>project_config/</code> と並べて <code>trained/</code> と <code>cache/</code> を置く。
+     Anagnorisis は両方を <code>project_config_path</code> から導出するため、実装では内側に入る。</p>
+  <p class="because">上流の設定解決に手を入れれば設計書どおりにできるが、それは §51 が
+     「本体を改造しすぎない」として避けよと言っている行為そのもの。</p>
+</div>
+
+<div class="decision deviation">
+  <span class="label">乖離</span>
+  <h3>Runpod のリクエスト形式（§22 と §23 が食い違う）</h3>
+  <p>§22 の入れ子形（<code>input.payload</code>）を正とした。操作を増やしても形が変わらないため。
+     GPU 側のパーサは §23 の平坦形も受け付ける。</p>
+</div>
+
+<h2>6. クォータとコスト</h2>
+<table>
+  <thead><tr><th>対象</th><th>制御</th></tr></thead>
+  <tbody>
+    <tr><td>YouTube <code>search.list</code></td><td>1 日 100 回の許容量に対し 30 回まで。呼ぶ<strong>前</strong>に台帳で数える（§42）</td></tr>
+    <tr><td>YouTube その他</td><td>1 回 1 単位。アップロード巡回は 1 日約 80 単位（許容量 10,000）</td></tr>
+    <tr><td>Runpod GPU</td><td>学習とバッチ採点のときだけ起動。<code>workersMin = 0</code></td></tr>
+    <tr><td>Runpod Volume</td><td>約 40 GB。古いモデル版は新しい 5 つを残して削除</td></tr>
+  </tbody>
+</table>
+
+<h2>7. 確認済みの動作</h2>
+<table>
+  <thead><tr><th>項目</th><th>結果</th></tr></thead>
+  <tbody>
+    <tr><td>D1 マイグレーション 6 本（wrangler 実行）</td><td>全件適用、<code>catalog_item</code> の移送と削除を含む</td></tr>
+    <tr><td>Worker のビルドとバインディング解決</td><td><code>wrangler deploy --dry-run</code> 成功</td></tr>
+    <tr><td>SPA ビルド</td><td>成功（gzip 約 80 KB）</td></tr>
+    <tr><td>自動テスト</td><td>Worker 107 件 / Python 25 件</td></tr>
+    <tr><td>ブラウザ実動作</td><td><a href="../verification/RUN.md">docs/verification/RUN.md</a>（スクリーンショット 6 枚）</td></tr>
+  </tbody>
+</table>
+<p class="figure-note">未実施: Cloudflare / Runpod への実デプロイ、GPU コンテナの起動。いずれもグローバルルール 4・5 により別途承認が必要。</p>
+
+<h2>8. ターン数</h2>
+<table>
+  <thead><tr><th></th><th></th></tr></thead>
+  <tbody>
+    <tr><td>予定ターン数</td><td>4</td></tr>
+    <tr><td>実際のターン数</td><td>5</td></tr>
+  </tbody>
+</table>
+<p class="figure-note">差分は、拡張の扱い・推薦エンジンの置換範囲・実装フェーズ・ディレクトリ構成の 4 決定と、
+拡張のローカルデータおよび upstream 参照の可否を実装前に確定させたため。後から変えると手戻りが大きい判断だった。</p>
+
+<footer>
+  数値・仕様の正は Markdown 側。このページと食い違いがあれば Markdown を信じてください。
+</footer>
+
+</div>
+</body>
+</html>

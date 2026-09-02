@@ -1,0 +1,345 @@
+/*
+ * One stylesheet, no framework.
+ *
+ * The design lists Tailwind "or similar" (section 6). Four screens of mostly-text
+ * layout do not earn a build step and a class vocabulary, and plain CSS keeps the
+ * deployment to two artefacts: the bundle and the Worker.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #ffffff;
+  --surface: #f6f7f9;
+  --border: #dfe3e8;
+  --text: #14171a;
+  --muted: #5b6570;
+  --accent: #2f6feb;
+  --accent-text: #ffffff;
+  --danger: #b4271f;
+  --star: #e8a33d;
+
+  --lane-subscription: #2f6feb;
+  --lane-related: #6b46c1;
+  --lane-explore: #0f8b6c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a;
+    --surface: #1d2126;
+    --border: #2e343b;
+    --text: #eef1f4;
+    --muted: #9aa4af;
+    --accent: #5b8dee;
+    --accent-text: #0b0d0f;
+    --danger: #f08a84;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  line-height: 1.55;
+}
+
+.app { max-width: 1180px; margin: 0 auto; padding: 0 1rem 4rem; }
+
+/* -- Chrome ------------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.brand {
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-size: 1.15rem;
+  font-weight: 650;
+  cursor: pointer;
+  padding: 0;
+}
+
+.topnav { display: flex; gap: 0.25rem; }
+
+.topnav button {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.35rem 0.7rem;
+}
+
+.topnav button.is-active { background: var(--surface); color: var(--text); }
+
+.footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* -- Layout ------------------------------------------------------------- */
+
+.page { padding-top: 1.25rem; }
+.page h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+
+.tabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+
+.tab {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.3rem 0.9rem;
+}
+
+.tab.is-active { background: var(--text); color: var(--bg); }
+.tab-action { margin-left: auto; border-color: var(--border); }
+
+.feed-meta { color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: 1.25rem;
+}
+
+/* -- Cards -------------------------------------------------------------- */
+
+.card { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.card-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-thumb-placeholder { display: block; width: 100%; height: 100%; }
+
+.lane {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.lane-subscription { background: var(--lane-subscription); }
+.lane-related { background: var(--lane-related); }
+.lane-explore { background: var(--lane-explore); }
+
+.card-duration {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 0.72rem;
+}
+
+.card-title { margin: 0; font-size: 0.95rem; line-height: 1.35; }
+
+.card-title button {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.card-meta { color: var(--muted); font-size: 0.82rem; margin: 0; }
+
+.card-reasons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.card-reasons li {
+  background: var(--surface);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  padding: 0.1rem 0.55rem;
+}
+
+/* -- Rating ------------------------------------------------------------- */
+
+.rating-stars { display: flex; gap: 0.15rem; }
+
+.rating-star {
+  background: none;
+  border: 0;
+  color: var(--border);
+  cursor: pointer;
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 0.1rem;
+}
+
+.rating-star.is-filled { color: var(--star); }
+.rating-star.rating-zero { color: var(--muted); font-size: 0.95rem; }
+.rating-star.rating-zero.is-selected { color: var(--danger); }
+.rating-star.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+.rating-caption { color: var(--muted); font-size: 0.82rem; margin: 0.35rem 0 0; }
+
+/* -- Video page --------------------------------------------------------- */
+
+.page-video { max-width: 820px; }
+
+.player { position: relative; aspect-ratio: 16 / 9; margin: 1rem 0; }
+.player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 10px; }
+
+.video-title { font-size: 1.25rem; margin: 0 0 0.35rem; }
+
+.description { white-space: pre-wrap; color: var(--muted); font-size: 0.9rem; }
+
+/* -- Panels ------------------------------------------------------------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-top: 1.25rem;
+  padding: 1rem 1.15rem;
+}
+
+.panel h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+.panel-note { color: var(--muted); font-size: 0.83rem; margin: 0.5rem 0 0; }
+
+.reasons, .history { list-style: none; margin: 0; padding: 0; }
+.reasons li, .history li { color: var(--muted); font-size: 0.88rem; padding: 0.1rem 0; }
+.history li.is-disabled { text-decoration: line-through; opacity: 0.6; }
+
+.facts { display: grid; gap: 0.35rem; margin: 0; }
+.facts > div { display: flex; justify-content: space-between; gap: 1rem; }
+.facts dt { color: var(--muted); margin: 0; }
+.facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+
+.actions button, .button, .add-interest button {
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  color: var(--accent-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 0.4rem 0.85rem;
+  text-decoration: none;
+}
+
+.actions button:disabled { opacity: 0.5; cursor: default; }
+
+.link {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+/* -- Interests ---------------------------------------------------------- */
+
+.add-interest { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+
+.add-interest input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+}
+
+.interests { list-style: none; margin: 0; padding: 0; }
+
+.interest {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.interest-name { font-weight: 600; font-size: 0.9rem; }
+
+.interest-bar { background: var(--border); border-radius: 999px; height: 6px; overflow: hidden; }
+.interest-bar > span { background: var(--accent); display: block; height: 100%; }
+
+.interest-state { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+
+.interest-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+.interest-actions button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  padding: 0.15rem 0.5rem;
+}
+
+.slider { display: flex; align-items: center; gap: 0.75rem; color: var(--muted); font-size: 0.85rem; }
+.slider input { flex: 1; }
+
+/* -- Tables and notices ------------------------------------------------- */
+
+.jobs { border-collapse: collapse; font-size: 0.83rem; width: 100%; }
+.jobs th, .jobs td { border-bottom: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: left; }
+.jobs th { color: var(--muted); font-weight: 600; }
+.job-failed { color: var(--danger); }
+.job-completed { color: var(--lane-explore); }
+
+.notice {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 1rem 0;
+  padding: 0.7rem 0.9rem;
+}
+
+.notice-error { border-color: var(--danger); color: var(--danger); }

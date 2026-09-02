@@ -1,0 +1,152 @@
+import type { EpochMillis, TrainPayload, TrainEvent } from '@ypr/domain'
+import { modelVersionName, toEngineRating } from '@ypr/domain'
+import type { Env } from '../../env.js'
+import { createJob, findJobByHash, markSubmitted, payloadHash } from '../../db/jobs.js'
+import { createModelVersion, nextVersionNumber } from '../../db/models.js'
+import { currentRatings } from '../../db/ratings.js'
+import { loadVideosWithChannels } from '../../db/videos.js'
+import { RunpodClient } from '../runpod/client.js'
+import { videoText } from './text.js'
+
+/**
+ * Submitting a training run (design sections 24 and 31).
+ *
+ * The training set is built from the *current* rating of each video, not from every
+ * event. That is not a contradiction of the append-only rule: the log keeps both
+ * ratings so that a change of mind stays visible, but a model trained on a rating the
+ * user has since replaced would be learning something they no longer think. Design
+ * section 11 makes exactly this distinction — keep both, treat the newest as current.
+ */
+
+export interface TrainSubmission {
+  jobId: string
+  modelVersionId: string
+  modelVersion: string
+  eventCount: number
+  /** Set when an identical run was already in flight and this one was not submitted. */
+  deduplicatedFrom?: string
+}
+
+export class NotEnoughRatings extends Error {
+  constructor(readonly have: number, readonly need: number) {
+    super(`training needs at least ${need} ratings, have ${have}`)
+    this.name = 'NotEnoughRatings'
+  }
+}
+
+/**
+ * A model trained on a handful of ratings predicts noise, and the run still costs the
+ * same GPU minutes. Ten is low enough to be reachable in one sitting and high enough
+ * that the result is worth acting on.
+ */
+export const MIN_TRAINING_EVENTS = 10
+
+export async function submitTraining(
+  env: Env,
+  profileId: string,
+  now: EpochMillis,
+  options: { fetchImpl?: typeof fetch; timeBudgetSeconds?: number } = {},
+): Promise<TrainSubmission> {
+  if (!env.RUNPOD_API_KEY || !env.RUNPOD_ENDPOINT_ID) {
+    throw new Error('Runpod is not configured: set RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID')
+  }
+
+  const events = await buildTrainingSet(env.DB, profileId)
+  if (events.length < MIN_TRAINING_EVENTS) {
+    throw new NotEnoughRatings(events.length, MIN_TRAINING_EVENTS)
+  }
+
+  // The version number is deliberately not part of the hash. It is the *name of the
+  // output*, not an input: the same ratings produce the same model whether it is
+  // called `model-2` or `model-3`, and including it would mean a second press of
+  // "retrain" never matched the first — which is the case the check exists for.
+  const hash = await payloadHash({
+    type: 'train',
+    profileId,
+    modelVersion: '',
+    ids: events.map((event) => `${event.itemId}:${event.rating}`),
+  })
+
+  // The same ratings produce the same model, so a second press of "retrain" with
+  // nothing rated in between is work already being done (design section 47).
+  const existing = await findJobByHash(env.DB, hash)
+  if (existing && existing.status !== 'failed') {
+    return {
+      jobId: existing.id,
+      modelVersionId: existing.context.modelVersionId ?? '',
+      modelVersion: existing.context.modelVersion ?? '',
+      eventCount: events.length,
+      deduplicatedFrom: existing.id,
+    }
+  }
+
+  // Claimed only once the work is going ahead, so a deduplicated call does not burn a
+  // version number on a run that never happens.
+  const version = await nextVersionNumber(env.DB, profileId)
+  const modelVersion = modelVersionName(version)
+
+  const modelVersionId = crypto.randomUUID()
+  await createModelVersion(env.DB, {
+    id: modelVersionId,
+    profileId,
+    version,
+    trainingEventCount: events.length,
+    now,
+  })
+
+  const jobId = crypto.randomUUID()
+  await createJob(env.DB, {
+    id: jobId,
+    type: 'train',
+    payloadHash: hash,
+    context: { profileId, modelVersion, modelVersionId },
+    now,
+  })
+
+  const payload: TrainPayload = {
+    profile: profileId,
+    modelVersion,
+    events,
+    ...(options.timeBudgetSeconds ? { timeBudgetSeconds: options.timeBudgetSeconds } : {}),
+  }
+
+  const client = new RunpodClient({
+    apiKey: env.RUNPOD_API_KEY,
+    endpointId: env.RUNPOD_ENDPOINT_ID,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  })
+
+  const runpodJobId = await client.run('train', payload)
+  await markSubmitted(env.DB, jobId, runpodJobId, now)
+
+  return { jobId, modelVersionId, modelVersion, eventCount: events.length }
+}
+
+/**
+ * Every currently-held opinion, as text and a 0..10 rating.
+ *
+ * The doubling to Anagnorisis's scale happens here and nowhere else, so that what is
+ * stored stays on the scale the user chose from and a change of engine cannot
+ * reinterpret it.
+ */
+export async function buildTrainingSet(db: D1Database, profileId: string): Promise<TrainEvent[]> {
+  const ratings = await currentRatings(db, profileId)
+  if (ratings.size === 0) return []
+
+  const events: TrainEvent[] = []
+  for (const { video, channel } of await loadVideosWithChannels(db, [...ratings.keys()])) {
+    const rating = ratings.get(video.id)
+    if (rating === undefined) continue
+    events.push({
+      itemId: video.id,
+      rating: toEngineRating(rating),
+      description: videoText(video, channel),
+    })
+  }
+
+  // Sorted by id so that the same set of ratings always produces the same payload, and
+  // therefore the same hash. Without it, the idempotency check in design section 47
+  // would depend on the order D1 happened to return rows in.
+  events.sort((left, right) => (left.itemId < right.itemId ? -1 : left.itemId > right.itemId ? 1 : 0))
+  return events
+}

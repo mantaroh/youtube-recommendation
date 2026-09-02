@@ -1,11 +1,11 @@
-# Connecting the extension to the YouTube Data API
+# Connecting to the YouTube Data API
 
-The extension runs without any credentials: it falls back to a built-in fixture catalog so
-the preference model, the interest editor and the ranker can all be exercised offline.
-Follow this document only when you want it reading your real subscriptions.
+The application runs without any credentials — the feed, the ratings, the preferences
+screen and the export all work against whatever is in the database. Follow this only
+when you want it reading your real subscriptions and discovering new videos.
 
-Nothing here sends preference data anywhere. The credentials below are used to talk to
-Google and to nobody else (design section 1).
+Nothing here sends preference data anywhere. These credentials are used to talk to
+Google and to nobody else; the GPU service is never given a token (design section 44).
 
 ## 1. Google Cloud project
 
@@ -16,7 +16,9 @@ Google and to nobody else (design section 1).
 
 1. *APIs & Services → OAuth consent screen*.
 2. User type **External** is fine for personal use.
-3. Add the scope `https://www.googleapis.com/auth/youtube.readonly`.
+3. Add the scope `https://www.googleapis.com/auth/youtube.readonly`. That is the
+   narrowest scope covering `subscriptions.list(mine=true)`, and the system asks for no
+   write scope because it never uploads, comments or edits anything.
 4. Add your own Google account under **Test users**. Without this the sign-in is refused
    while the app is unpublished.
 
@@ -24,61 +26,70 @@ Google and to nobody else (design section 1).
 
 1. *APIs & Services → Credentials → Create credentials → OAuth client ID*.
 2. Application type: **Web application**.
-   Not "Chrome extension" — this project uses `identity.launchWebAuthFlow`, which
-   redirects to an https URI, so that the same code works in Firefox.
-3. Under **Authorised redirect URIs**, add the value the extension shows on
-   *Settings → Redirect URI to register*. It looks like:
+3. Under **Authorised redirect URIs**, add your deployment's callback:
 
-   - Chrome: `https://<extension-id>.chromiumapp.org/`
-   - Firefox: `https://<uuid>.extensions.allizom.org/`
+   ```text
+   https://<your-worker-host>/api/auth/youtube/callback
+   ```
 
-   The id is derived from the unpacked extension's directory, so it stays the same as long
-   as you load it from the same path. Loading it from a different folder changes the id and
-   the redirect URI has to be added again.
+   For local development, `http://127.0.0.1:8787/api/auth/youtube/callback`.
+
+   The redirect lands on the Worker, not on the browser. The browser never sees a token
+   at any point in this flow (design section 16).
 
 ## 4. API key
 
 1. *Create credentials → API key*.
 2. Restrict it to **YouTube Data API v3**.
 
-The API key covers the calls that do not act on your behalf (`search.list`, `videos.list`);
-the OAuth token covers the ones that do (`subscriptions.list`, `playlistItems.list`).
+The API key covers the calls that act as nobody in particular — `videos.list`,
+`playlistItems.list`, `search.list`. The OAuth token covers the one call that acts as
+you, `subscriptions.list`. Using the token where the key would do would attach your
+identity to requests that had no need of it, so the two are kept apart.
 
-## 5. Load the extension
+## 5. Set the secrets
 
 ```bash
-pnpm --filter @ypr/extension build
+cd apps/web
+
+npx wrangler secret put YOUTUBE_API_KEY
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put OAUTH_REDIRECT_URI       # the URI from step 3
+
+# 32 random bytes, base64. This wraps the stored token, so a copy of the database is
+# not a copy of your account. Losing it means reconnecting; leaking it means the
+# encryption bought you nothing.
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))" \
+  | npx wrangler secret put OAUTH_ENCRYPTION_KEY
 ```
 
-Then in Chrome: *chrome://extensions* → enable **Developer mode** → **Load unpacked** →
-select `packages/extension/.output/chrome-mv3`.
+For local development, put the same values in `apps/web/.dev.vars` (git-ignored):
 
-In Firefox: *about:debugging → This Firefox → Load Temporary Add-on* → select
-`packages/extension/.output/firefox-mv2/manifest.json`.
-
-## 6. Enter the credentials
-
-Open the extension, go to **Settings**, paste the client id and API key, press *Save*, then
-*Connect* and complete the Google consent screen. **Status** should now show `live` instead
-of `fixture`.
-
-### Alternative: a build-time file
-
-For a development build you can skip the UI by creating
-`packages/extension/.env.local`:
-
-```
-VITE_YT_CLIENT_ID=000000000000-xxxxxxxx.apps.googleusercontent.com
-VITE_YT_API_KEY=AIza...
+```text
+YOUTUBE_API_KEY="AIza..."
+GOOGLE_CLIENT_ID="000000000000-xxxxxxxx.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="GOCSPX-..."
+OAUTH_REDIRECT_URI="http://127.0.0.1:8787/api/auth/youtube/callback"
+OAUTH_ENCRYPTION_KEY="..."
 ```
 
-The file is git-ignored. Values entered in the UI take precedence over it.
+## 6. Connect
+
+Open **Settings** and press *Connect YouTube*. The subscription list is pulled
+immediately; new uploads from those channels arrive on the next scheduled run, or when
+you press *Fetch new uploads*.
 
 ## Daily budget
 
-The extension caps itself at 60 `search.list` calls per day and accounts general units
-against a 10,000 unit budget (design section 6.1). Usage is shown on the **Status** tab and
-resets on the US Pacific day boundary, which is when the API quota actually resets.
+`search.list` has an allowance of a hundred calls a day, separate from the main quota,
+and there is no way to ask what is left of it. A discovery run therefore spends at most
+thirty, counted before each call rather than after (design section 42), leaving the rest
+for manual searching and for a second run on a day when the first found nothing.
 
-If a budget runs out, ingestion degrades rather than failing: the subscription lane keeps
-working because it does not use `search.list` at all.
+Everything else costs one unit per call against a ten-thousand unit allowance. Walking
+forty channels' uploads twice a day is eighty units, so it is not the constraint.
+
+When the search budget runs out, discovery degrades rather than failing: the
+subscription lane keeps working, because it does not use `search.list` at all. Usage for
+the day is shown on the **Settings** screen.
