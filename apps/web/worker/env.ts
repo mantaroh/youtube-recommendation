@@ -22,6 +22,15 @@ export interface Env {
   OAUTH_ENCRYPTION_KEY?: string
   RUNPOD_API_KEY?: string
   RUNPOD_ENDPOINT_ID?: string
+  /**
+   * An engine somewhere other than Runpod, e.g. `http://127.0.0.1:9000`.
+   *
+   * The GPU service speaks one envelope and three routes, none of them Runpod's own,
+   * so the same container can be reached at a plain address. Set this and the Runpod
+   * credentials become optional — which is what lets the whole job pipeline be
+   * exercised on a machine with no GPU account at all.
+   */
+  PREFERENCE_ENGINE_URL?: string
 
   // -- Vars ----------------------------------------------------------------
 

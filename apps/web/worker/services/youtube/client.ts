@@ -1,4 +1,5 @@
 import type { SourceChannel, SourceItem } from '@ypr/domain'
+import { boundFetch } from '../../http.js'
 
 /**
  * A thin YouTube Data API v3 client.
@@ -54,7 +55,7 @@ export class YouTubeClient {
   private readonly fetchImpl: typeof fetch
 
   constructor(private readonly credentials: YouTubeClientOptions) {
-    this.fetchImpl = credentials.fetchImpl ?? fetch
+    this.fetchImpl = boundFetch(credentials.fetchImpl)
   }
 
   /**

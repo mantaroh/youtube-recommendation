@@ -64,3 +64,16 @@ export function formatViews(count: number | null): string {
   if (count >= 1_000) return `${(count / 1_000).toFixed(0)}K views`
   return `${count} views`
 }
+
+/**
+ * The URL of a video's page.
+ *
+ * Shared by the router and by the feed cards so the two cannot disagree. It matters
+ * that this is a real path rather than something only JavaScript understands: a card
+ * that navigates by handler alone cannot be middle-clicked, opened in a background
+ * tab, or copied as a link, and the feed is exactly the sort of list where people do
+ * all three.
+ */
+export function videoPath(videoId: string): string {
+  return `/video/${encodeURIComponent(videoId)}`
+}

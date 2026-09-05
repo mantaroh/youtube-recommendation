@@ -128,6 +128,7 @@ body {
 .card-thumb {
   position: relative;
   display: block;
+  text-decoration: none;
   width: 100%;
   aspect-ratio: 16 / 9;
   padding: 0;
@@ -169,14 +170,15 @@ body {
 
 .card-title { margin: 0; font-size: 0.95rem; line-height: 1.35; }
 
-.card-title button {
-  background: none;
-  border: 0;
+.card-title a {
   color: inherit;
-  cursor: pointer;
-  font: inherit;
-  padding: 0;
-  text-align: left;
+  text-decoration: none;
+}
+
+/* Underline on hover only: a feed of links all underlined at rest is a wall of rules. */
+.card-title a:hover,
+.card-title a:focus-visible {
+  text-decoration: underline;
 }
 
 .card-meta { color: var(--muted); font-size: 0.82rem; margin: 0; }
@@ -343,3 +345,23 @@ body {
 }
 
 .notice-error { border-color: var(--danger); color: var(--danger); }
+
+.locale { display: flex; flex-wrap: wrap; gap: 1.25rem; margin-top: .5rem; }
+
+.locale label {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  color: var(--muted);
+  font-size: .8rem;
+}
+
+.locale select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: .88rem;
+  padding: .35rem .5rem;
+}

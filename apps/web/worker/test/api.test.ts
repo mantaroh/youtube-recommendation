@@ -172,11 +172,11 @@ describe('the model route', () => {
     const body = (await response.json()) as {
       active: unknown
       minimumRatings: number
-      runpodConfigured: boolean
+      engineConfigured: boolean
     }
     expect(body.active).toBeNull()
     expect(body.minimumRatings).toBeGreaterThan(0)
-    expect(body.runpodConfigured).toBe(false)
+    expect(body.engineConfigured).toBe(false)
   })
 
   it('refuses to train with too few ratings, and says how many are needed', async () => {
@@ -198,7 +198,7 @@ describe('the model route', () => {
     const response = await call(envWith(db), '/api/model/score', { method: 'POST' })
     expect(response.status).toBe(502)
     const body = (await response.json()) as { error: string }
-    expect(body.error).toMatch(/Runpod is not configured/)
+    expect(body.error).toMatch(/no preference engine configured/)
   })
 })
 
@@ -207,7 +207,7 @@ describe('status and export', () => {
     const db = createTestDatabase()
     const response = await call(envWith(db), '/api/status')
     const body = (await response.json()) as { configured: Record<string, boolean> }
-    expect(body.configured.runpod).toBe(false)
+    expect(body.configured.engine).toBe(false)
     expect(body.configured.access).toBe(false)
   })
 

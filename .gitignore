@@ -23,3 +23,14 @@ Thumbs.db
 
 # Local wrangler secrets
 .dev.vars
+
+# Credentials dropped in the working tree. Never commit these: a key in git history
+# stays there after the file is deleted, and has to be rotated rather than removed.
+youtube-api-token.txt
+youtube-oauth-key.txt
+*-key.txt
+*-token.txt
+
+# Python bytecode
+__pycache__/
+*.pyc

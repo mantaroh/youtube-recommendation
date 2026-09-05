@@ -58,10 +58,12 @@ export interface StatusResponse {
   ratings: number
   activeModel: ModelVersion | null
   searchCallsUsedToday: number
+  /** Which preference engine jobs go to, or null when none is configured. */
+  engine: string | null
   configured: {
     youtubeApiKey: boolean
     oauth: boolean
-    runpod: boolean
+    engine: boolean
     backups: boolean
     access: boolean
   }
@@ -88,7 +90,8 @@ export interface ModelResponse {
   lastTrainedAt: number | null
   ratingsSinceLastTraining: number
   minimumRatings: number
-  runpodConfigured: boolean
+  engineConfigured: boolean
+  engine: string | null
 }
 
 export interface DiscoverySummary {
@@ -151,9 +154,11 @@ export const api = {
 
   model: () => request<ModelResponse>('/model'),
 
-  train: () => request<{ jobId: string; modelVersion: string; eventCount: number }>('/model/train', {
-    method: 'POST',
-  }),
+  train: (options: { timeBudgetSeconds?: number } = {}) =>
+    request<{ jobId: string; modelVersion: string; eventCount: number }>('/model/train', {
+      method: 'POST',
+      body: JSON.stringify(options),
+    }),
 
   score: () => request<{ jobIds: string[]; itemCount: number }>('/model/score', { method: 'POST' }),
 

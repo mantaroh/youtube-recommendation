@@ -44,6 +44,10 @@ export const interestControlRequestSchema = z.object({
 
 export const settingsPatchSchema = z.object({
   discovery: z.number().min(0).max(1).optional(),
+  /** ISO 3166-1 alpha-2, e.g. `JP`. */
+  region: z.string().regex(/^[A-Z]{2}$/).optional(),
+  /** ISO 639-1, e.g. `ja`. */
+  language: z.string().regex(/^[a-z]{2}$/).optional(),
   feedSize: z.number().int().min(1).max(200).optional(),
   maxPerChannel: z.number().int().min(1).max(20).optional(),
   laneMix: z
@@ -53,6 +57,18 @@ export const settingsPatchSchema = z.object({
       explore: z.number().min(0).max(1),
     })
     .optional(),
+})
+
+/**
+ * How long one training run may take.
+ *
+ * Exposed because the right answer depends on the machine and the size of the rating
+ * set, and getting it wrong is not merely slow: a run cut short still reports success
+ * and can leave a model that predicts one constant. Two hundred ratings on a CPU need
+ * far longer than twenty on a GPU, and only the caller knows which they have.
+ */
+export const trainRequestSchema = z.object({
+  timeBudgetSeconds: z.number().int().min(60).max(4 * 3600).optional(),
 })
 
 export const discoveryRunRequestSchema = z.object({

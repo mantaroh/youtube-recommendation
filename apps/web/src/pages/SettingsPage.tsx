@@ -116,7 +116,7 @@ export function SettingsPage() {
             {model.active ? `model-${model.active.version} is live` : 'Nothing trained yet'} ·{' '}
             {model.ratingsSinceLastTraining} ratings since the last run · needs at least{' '}
             {model.minimumRatings}
-            {!model.runpodConfigured && ' · Runpod is not configured'}
+            {model.engine ? ` · engine: ${model.engine}` : ' · no engine configured'}
           </p>
         )}
         <div className="actions">
@@ -133,6 +133,12 @@ export function SettingsPage() {
         <p className="panel-note">
           Training runs on a GPU that is asleep the rest of the time, so a run takes minutes. The
           feed keeps working from the scores it already has while it happens.
+        </p>
+        <p className="panel-note">
+          The engine trains against a large set of synthetic negatives, so a run that is cut
+          short settles on predicting the same number for everything — and still reports
+          success. If every video is suddenly predicted alike, the training run was too short
+          rather than your ratings too few.
         </p>
       </div>
 

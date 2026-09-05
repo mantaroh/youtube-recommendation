@@ -5,6 +5,7 @@ import { countVideos, listChannels } from '../db/videos.js'
 import { activeModel } from '../db/models.js'
 import { listAllRatings } from '../db/ratings.js'
 import { usedToday } from '../db/quota.js'
+import { engineConfigured, engineDescription } from '../services/runpod/engine.js'
 
 /**
  * Status, export and backup (design sections 45 and 46).
@@ -34,10 +35,11 @@ dataRoutes.get('/status', async (context) => {
     ratings: ratings.length,
     activeModel: model,
     searchCallsUsedToday: searchUsed,
+    engine: engineDescription(app.env),
     configured: {
       youtubeApiKey: Boolean(app.env.YOUTUBE_API_KEY),
       oauth: Boolean(app.env.GOOGLE_CLIENT_ID && app.env.OAUTH_ENCRYPTION_KEY),
-      runpod: Boolean(app.env.RUNPOD_API_KEY && app.env.RUNPOD_ENDPOINT_ID),
+      engine: engineConfigured(app.env),
       backups: Boolean(app.env.BACKUPS),
       access: Boolean(app.env.ACCESS_TEAM_DOMAIN && app.env.ACCESS_AUD),
     },

@@ -76,6 +76,20 @@ export function PreferencesPage() {
     [],
   )
 
+  const setLocale = useCallback(
+    async (patch: { region?: string; language?: string }) => {
+      setData((current) =>
+        current ? { ...current, settings: { ...current.settings, ...patch } } : current,
+      )
+      try {
+        await api.saveSettings(patch)
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught))
+      }
+    },
+    [],
+  )
+
   if (!data) return <p className="notice">Loading…</p>
 
   return (
@@ -183,9 +197,73 @@ export function PreferencesPage() {
           {Math.round(data.settings.laneMix.explore * 100)}% further afield.
         </p>
       </div>
+
+      <div className="panel">
+        <h2>Region and language</h2>
+        <p className="panel-note">
+          What the search is asked for, and which language the "further afield" lane writes its
+          queries in. Both are relevance biases rather than filters, so content in other languages
+          still appears. Left unset, YouTube guesses a region from wherever the request happened to
+          arrive from, which is not where you are.
+        </p>
+        <div className="locale">
+          <label>
+            Region
+            <select
+              value={data.settings.region}
+              onChange={(event) => void setLocale({ region: event.target.value })}
+            >
+              {REGIONS.map((entry) => (
+                <option key={entry.code} value={entry.code}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Language
+            <select
+              value={data.settings.language}
+              onChange={(event) => void setLocale({ language: event.target.value })}
+            >
+              {LANGUAGES.map((entry) => (
+                <option key={entry.code} value={entry.code}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
     </section>
   )
 }
+
+/**
+ * A short list rather than every ISO code.
+ *
+ * The setting decides which popularity chart is read and which language the explore
+ * lane searches in; a picker with two hundred entries would make that harder to get
+ * right, not easier. The API accepts any valid code for anyone who needs one.
+ */
+const REGIONS = [
+  { code: 'JP', label: '日本 (JP)' },
+  { code: 'US', label: 'United States (US)' },
+  { code: 'GB', label: 'United Kingdom (GB)' },
+  { code: 'KR', label: '대한민국 (KR)' },
+  { code: 'TW', label: '臺灣 (TW)' },
+  { code: 'DE', label: 'Deutschland (DE)' },
+  { code: 'FR', label: 'France (FR)' },
+]
+
+const LANGUAGES = [
+  { code: 'ja', label: '日本語 (ja)' },
+  { code: 'en', label: 'English (en)' },
+  { code: 'ko', label: '한국어 (ko)' },
+  { code: 'zh', label: '中文 (zh)' },
+  { code: 'de', label: 'Deutsch (de)' },
+  { code: 'fr', label: 'Français (fr)' },
+]
 
 function describeState(control: InterestControl): string {
   if (control.muteUntil !== null && control.muteUntil > Date.now()) {

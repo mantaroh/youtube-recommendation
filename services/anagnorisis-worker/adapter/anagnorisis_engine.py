@@ -64,9 +64,11 @@ class AnagnorisisEngine(PreferenceEngine):
                 "anagnorisis_core is not installed in this image"
             ) from error
 
+        # `models_path`, not `embedding_models_path`: the README documents the latter
+        # and the shipped signature takes the former. Verified against 0.4.10.
         cfg = load_config(
             project_config_path=str(paths.project_config),
-            embedding_models_path=str(paths.embedding_models),
+            models_path=str(paths.embedding_models),
             use_user_config=False,
         )
         self._config_cache[paths.profile] = cfg
@@ -105,11 +107,13 @@ class AnagnorisisEngine(PreferenceEngine):
                 # The date the memory file is filed under. Passing the real rating date
                 # means re-running training writes the same files rather than a second
                 # set under today's date.
-                when=event.rated_at,
+                when=_as_date(event.rated_at),
             )
 
+        probe = _AccuracyProbe()
         model_path = api.train_evaluator(
             cfg=cfg,
+            ctx=probe,
             max_steps=max_steps,
             time_budget_seconds=time_budget_seconds,
         )
@@ -126,6 +130,7 @@ class AnagnorisisEngine(PreferenceEngine):
             model_path=str(final),
             trained_event_count=len(events),
             trained_seconds=time.monotonic() - started,
+            accuracy=probe.accuracy,
         )
 
     # -- inference --------------------------------------------------------
@@ -181,6 +186,65 @@ class AnagnorisisEngine(PreferenceEngine):
             body, _ = description.body_for_text(item.text, cfg=cfg, summarise=None)
             described.append(body or item.text)
         return described
+
+
+class _AccuracyProbe:
+    """Catches the accuracies the trainer reports, which it does not return.
+
+    ``train_universal_evaluator`` computes a best epoch and train and test accuracy,
+    prints them, and hands them to its progress callback — then returns none of it. The
+    numbers matter here for one reason: a run cut short by its time budget still
+    finishes "successfully" and can leave a model that predicts one constant, and the
+    test accuracy is the only signal that says so. Without this, that model is stored,
+    activated and ranked with, and nothing anywhere records that it is useless.
+
+    The final message has a fixed shape — ``Best Epoch: N, Train Accuracy: X%, Test
+    Accuracy: Y%`` — so it is matched rather than parsed. If upstream reworks the
+    wording this stops finding anything, which loses a diagnostic and breaks nothing.
+    """
+
+    def __init__(self) -> None:
+        self.accuracy: dict[str, float] = {}
+
+    # The progress interface upstream expects: check() and update(fraction, message).
+    def check(self) -> None:
+        return None
+
+    def update(self, fraction: float, message: str) -> None:
+        import re
+
+        found = re.search(r"Train Accuracy: ([\d.]+)%.*?Test Accuracy: ([\d.]+)%", message)
+        if found:
+            self.accuracy["train"] = float(found.group(1)) / 100
+            self.accuracy["test"] = float(found.group(2)) / 100
+        epoch = re.search(r"Best Epoch: (\d+)", message)
+        if epoch:
+            self.accuracy["bestEpoch"] = float(epoch.group(1))
+        if "Time budget" in message:
+            # Recorded as a fact rather than an error: hitting the ceiling is only a
+            # problem if the model also failed to learn, and the accuracies say that.
+            self.accuracy["timeBudgetReached"] = 1.0
+
+
+def _as_date(rated_at: str | None):
+    """The ISO timestamp our protocol carries, as the ``date`` upstream wants.
+
+    ``save_text_rating`` files a memory under ``memory/<date>/`` and calls
+    ``.isoformat()`` on whatever it is given, so a string reaches it as an
+    ``AttributeError`` rather than a date. Only the day matters: two ratings of the
+    same text on the same day are the same memory file, which is what makes re-running
+    a training set idempotent.
+    """
+    import datetime
+
+    if not rated_at:
+        return None
+    try:
+        # `fromisoformat` in 3.11 accepts the trailing Z, but not every producer emits
+        # one, so the parse is guarded rather than assumed.
+        return datetime.datetime.fromisoformat(rated_at.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
 
 
 def _read_model(model_path, paths: ProfilePaths) -> bytes:

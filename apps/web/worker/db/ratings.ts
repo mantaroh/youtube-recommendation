@@ -1,4 +1,5 @@
 import type { EpochMillis, Lane, RatingEvent, RatingValue } from '@ypr/domain'
+import { IMPRESSION_WINDOW_MS } from '@ypr/domain'
 
 /**
  * Rating events (design sections 10 and 11).
@@ -158,6 +159,13 @@ export async function countRatingsSince(
  * Kept apart from ratings because being shown something and having an opinion about it
  * are different facts; merging them would make an ignored impression indistinguishable
  * from a deliberate zero.
+ *
+ * Counted at most once per `IMPRESSION_WINDOW_MS`. Without that, opening a video and
+ * pressing back counts as a fresh showing of everything that was on screen, and the
+ * `seen_penalty` demotes it — so the feed reorders itself as a *consequence of being
+ * read*, which is not what design section 33 is asking for. Both columns move together
+ * or neither does: advancing `shown_at` on an uncounted view would push the window
+ * forward forever and a genuine second look, days later, would never register.
  */
 export async function recordImpressions(
   db: D1Database,
@@ -166,6 +174,7 @@ export async function recordImpressions(
   now: EpochMillis,
 ): Promise<void> {
   if (entries.length === 0) return
+  const counts = now - IMPRESSION_WINDOW_MS
   await db.batch(
     entries.map((entry) =>
       db
@@ -173,11 +182,13 @@ export async function recordImpressions(
           `INSERT INTO impressions (profile_id, video_id, lane, shown_at, shown_count)
            VALUES (?1, ?2, ?3, ?4, 1)
            ON CONFLICT(profile_id, video_id) DO UPDATE SET
-             shown_at = excluded.shown_at,
-             shown_count = impressions.shown_count + 1,
+             shown_count = impressions.shown_count
+               + CASE WHEN impressions.shown_at <= ?5 THEN 1 ELSE 0 END,
+             shown_at = CASE WHEN impressions.shown_at <= ?5 THEN excluded.shown_at
+                             ELSE impressions.shown_at END,
              lane = excluded.lane`,
         )
-        .bind(profileId, entry.videoId, entry.lane, now),
+        .bind(profileId, entry.videoId, entry.lane, now, counts),
     ),
   )
 }

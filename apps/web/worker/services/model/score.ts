@@ -4,7 +4,7 @@ import type { Env } from '../../env.js'
 import { createJob, findJobByHash, markSubmitted, payloadHash } from '../../db/jobs.js'
 import { activeModel, unscoredVideoIds } from '../../db/models.js'
 import { loadVideosWithChannels } from '../../db/videos.js'
-import { RunpodClient } from '../runpod/client.js'
+import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured } from '../runpod/engine.js'
 import { videoText } from './text.js'
 
 /**
@@ -33,9 +33,7 @@ export async function submitScoring(
     limit?: number
   } = {},
 ): Promise<ScoreSubmission> {
-  if (!env.RUNPOD_API_KEY || !env.RUNPOD_ENDPOINT_ID) {
-    throw new Error('Runpod is not configured: set RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID')
-  }
+  if (!engineConfigured(env)) throw new Error(ENGINE_NOT_CONFIGURED)
 
   const model = await activeModel(env.DB, profileId)
   if (!model) {
@@ -61,11 +59,7 @@ export async function submitScoring(
     text: videoText(video, channel),
   }))
 
-  const client = new RunpodClient({
-    apiKey: env.RUNPOD_API_KEY,
-    endpointId: env.RUNPOD_ENDPOINT_ID,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  })
+  const client = engineClient(env, options.fetchImpl)
 
   const jobIds: string[] = []
   let skipped = 0

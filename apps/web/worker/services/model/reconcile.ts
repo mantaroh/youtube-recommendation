@@ -7,7 +7,8 @@ import {
 import type { Env } from '../../env.js'
 import { listRetryable, listUnfinished, markCompleted, markFailed, markSubmitted } from '../../db/jobs.js'
 import { activateModel, saveScores, setModelStatus } from '../../db/models.js'
-import { mapRunpodStatus, RunpodClient } from '../runpod/client.js'
+import { mapRunpodStatus } from '../runpod/client.js'
+import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured } from '../runpod/engine.js'
 import { submitScoring } from './score.js'
 
 /**
@@ -46,16 +47,12 @@ export async function reconcileJobs(
     errors: [],
   }
 
-  if (!env.RUNPOD_API_KEY || !env.RUNPOD_ENDPOINT_ID) {
-    summary.errors.push('Runpod is not configured')
+  if (!engineConfigured(env)) {
+    summary.errors.push(ENGINE_NOT_CONFIGURED)
     return summary
   }
 
-  const client = new RunpodClient({
-    apiKey: env.RUNPOD_API_KEY,
-    endpointId: env.RUNPOD_ENDPOINT_ID,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  })
+  const client = engineClient(env, options.fetchImpl)
 
   for (const job of await listUnfinished(env.DB)) {
     summary.checked += 1

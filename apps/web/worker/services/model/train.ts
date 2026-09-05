@@ -1,11 +1,11 @@
 import type { EpochMillis, TrainPayload, TrainEvent } from '@ypr/domain'
-import { modelVersionName, toEngineRating } from '@ypr/domain'
+import { modelVersionName, toEngineRating, TRAIN_TIME_BUDGET_SECONDS } from '@ypr/domain'
 import type { Env } from '../../env.js'
 import { createJob, findJobByHash, markSubmitted, payloadHash } from '../../db/jobs.js'
 import { createModelVersion, nextVersionNumber } from '../../db/models.js'
 import { currentRatings } from '../../db/ratings.js'
 import { loadVideosWithChannels } from '../../db/videos.js'
-import { RunpodClient } from '../runpod/client.js'
+import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured } from '../runpod/engine.js'
 import { videoText } from './text.js'
 
 /**
@@ -35,9 +35,17 @@ export class NotEnoughRatings extends Error {
 }
 
 /**
- * A model trained on a handful of ratings predicts noise, and the run still costs the
- * same GPU minutes. Ten is low enough to be reachable in one sitting and high enough
- * that the result is worth acting on.
+ * The floor below which a training run is not worth its GPU minutes.
+ *
+ * Ten is low: enough to be reached in one sitting, and enough for the engine to learn
+ * a usable separation. Measured — twelve ratings produced a model that scored two
+ * held-out items it should want at 9.65 and 9.04, and two it should not at 1.22 and
+ * 1.21.
+ *
+ * An earlier run at the same twelve produced a model that predicted one constant for
+ * everything, and the cause was not the rating count: that run had been cut off by too
+ * short a time budget, reaching epoch 10 against this one's 44. See
+ * `TRAIN_TIME_BUDGET_SECONDS`, and note that a truncated run still reports success.
  */
 export const MIN_TRAINING_EVENTS = 10
 
@@ -47,9 +55,7 @@ export async function submitTraining(
   now: EpochMillis,
   options: { fetchImpl?: typeof fetch; timeBudgetSeconds?: number } = {},
 ): Promise<TrainSubmission> {
-  if (!env.RUNPOD_API_KEY || !env.RUNPOD_ENDPOINT_ID) {
-    throw new Error('Runpod is not configured: set RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID')
-  }
+  if (!engineConfigured(env)) throw new Error(ENGINE_NOT_CONFIGURED)
 
   const events = await buildTrainingSet(env.DB, profileId)
   if (events.length < MIN_TRAINING_EVENTS) {
@@ -107,14 +113,10 @@ export async function submitTraining(
     profile: profileId,
     modelVersion,
     events,
-    ...(options.timeBudgetSeconds ? { timeBudgetSeconds: options.timeBudgetSeconds } : {}),
+    timeBudgetSeconds: options.timeBudgetSeconds ?? TRAIN_TIME_BUDGET_SECONDS,
   }
 
-  const client = new RunpodClient({
-    apiKey: env.RUNPOD_API_KEY,
-    endpointId: env.RUNPOD_ENDPOINT_ID,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  })
+  const client = engineClient(env, options.fetchImpl)
 
   const runpodJobId = await client.run('train', payload)
   await markSubmitted(env.DB, jobId, runpodJobId, now)

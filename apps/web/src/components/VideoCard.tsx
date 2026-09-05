@@ -1,6 +1,7 @@
+import type { MouseEvent } from 'react'
 import type { FeedItem, RatingValue } from '@ypr/domain'
 import { RatingControl } from './RatingControl.js'
-import { describeReason, formatDuration, formatViews } from '../domain/reasons.js'
+import { describeReason, formatDuration, formatViews, videoPath } from '../domain/reasons.js'
 
 /**
  * One card in the feed (design section 36).
@@ -9,6 +10,11 @@ import { describeReason, formatDuration, formatViews } from '../domain/reasons.j
  * most useful thing to know about it — "this is here because you subscribe" and "this
  * is here because it is unlike what you usually watch" call for different judgements
  * from the person looking at it.
+ *
+ * The thumbnail and the title are links, not buttons. That is what lets a middle click
+ * open a video in a background tab, which is the natural way to work through a feed:
+ * opening one in place and coming back rebuilds the feed, and a rebuilt feed is
+ * re-ranked and reordered under you.
  */
 export interface VideoCardProps {
   item: FeedItem
@@ -25,10 +31,26 @@ const LANE_LABELS = {
 export function VideoCard({ item, onOpen, onRate }: VideoCardProps) {
   const { video, channel } = item
   const channelTitle = channel?.title ?? video.metadata.channelTitle ?? ''
+  const href = videoPath(video.id)
+
+  /**
+   * Take over only the plain left click.
+   *
+   * Everything else — middle click, ctrl or cmd click, shift click, a right click and
+   * "open in new tab" — is left to the browser, which already does the right thing
+   * with an `href`. Intercepting those is how single-page applications end up unable
+   * to do what every other page can.
+   */
+  const openInPlace = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    onOpen(video.id)
+  }
 
   return (
     <article className="card">
-      <button type="button" className="card-thumb" onClick={() => onOpen(video.id)}>
+      <a className="card-thumb" href={href} onClick={openInPlace}>
         {video.thumbnailUrl ? (
           <img src={video.thumbnailUrl} alt="" loading="lazy" />
         ) : (
@@ -38,13 +60,13 @@ export function VideoCard({ item, onOpen, onRate }: VideoCardProps) {
         {video.durationSeconds ? (
           <span className="card-duration">{formatDuration(video.durationSeconds)}</span>
         ) : null}
-      </button>
+      </a>
 
       <div className="card-body">
         <h3 className="card-title">
-          <button type="button" onClick={() => onOpen(video.id)}>
+          <a href={href} onClick={openInPlace}>
             {video.title}
-          </button>
+          </a>
         </h3>
         <p className="card-meta">
           {channelTitle}

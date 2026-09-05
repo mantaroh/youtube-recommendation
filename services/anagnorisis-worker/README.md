@@ -120,6 +120,80 @@ docker run --rm --gpus all -v "$PWD/volume:/runpod-volume" anagnorisis-worker \
 That is phase 0 and phase 1 of design section 55: find out whether the recommendations
 are any good before there is anything to plug them into.
 
+## Running it without Runpod
+
+The engine also runs as a plain HTTP service, which is how to exercise the whole
+pipeline on a machine that has no GPU account — and, on a machine with no GPU at all,
+how to find out whether CPU inference is fast enough to be worth it.
+
+```bash
+python serve.py --volume ./volume --port 9000
+```
+
+Then point the Worker at it instead of Runpod:
+
+```text
+# apps/web/.dev.vars
+PREFERENCE_ENGINE_URL="http://127.0.0.1:9000"
+```
+
+Nothing else changes. `serve.py` speaks the same three routes (`/run`,
+`/status/{id}`, `/cancel/{id}`) and the same envelope, and runs jobs on a background
+thread rather than inside the POST — so the job ledger, the polling pass, the
+idempotency check and the atomic model switch are the real ones, not a simulation.
+That is the whole reason it is worth having: a local engine that answered
+synchronously would let a class of timing bug through untested.
+
+One worker thread, matching `workersMax = 1` (design section 26). It binds to
+localhost and authenticates nobody, so do not put it on an address anything else can
+reach: it runs model training on request.
+
+### Installing it on a machine
+
+```bash
+python -m venv .venv && . .venv/Scripts/activate   # or bin/activate
+
+# torch first, from PyTorch's own index. PyPI has no wheels for some platforms that
+# this index does — Windows on ARM among them.
+pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+
+# The core without its declared dependencies; see below.
+pip install --no-deps anagnorisis-core
+
+pip install numpy PyYAML omegaconf transformers sentence-transformers
+pip install huggingface-hub accelerate safetensors tokenizers
+pip install xxhash tinytag Pillow fs soundfile setproctitle
+```
+
+`--no-deps` for the core is deliberate. Upstream declares `librosa`,
+`opencv-python-headless` and `torchaudio` for image, audio and video handling, and
+this system reads none of those: it sends text (design section 3). On platforms where
+those three have no wheel, installing them is a compiler toolchain's worth of work for
+capability that is never called.
+
+Two platform notes worth keeping, because both cost an hour to rediscover:
+
+- **Windows on ARM**: PyYAML publishes `win_arm64` wheels only for Python 3.12 and
+  later. On 3.11 it falls back to compiling, which needs MSVC. Build the pure-Python
+  version instead: `PYYAML_FORCE_LIBYAML=0 pip install PyYAML`.
+- **Long paths on Windows**: torch unpacks paths past the 260-character limit, so a
+  virtualenv deep inside a project directory fails to install it. Put the environment
+  somewhere short.
+
+### Checking it works
+
+```bash
+python tools/local_smoke.py --volume ./volume
+```
+
+Twelve ratings in, a model out, four held-out items scored — through the same
+`dispatch` the service uses, with the real engine. It reports whether the two items
+the ratings imply the reader wants outrank the two they do not, which is a weaker
+claim than "the model is good" and a much stronger one than "it ran".
+
+The first run downloads about 3.4 GB of model weights into the volume. On CPU, expect
+training and scoring to be minutes rather than seconds.
+
 ## Deploying
 
 The image is the same for every profile — nothing user-specific is baked in — so it can

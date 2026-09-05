@@ -300,6 +300,19 @@ export interface AppSettings {
   weights: RankingWeights
   laneMix: LaneMix
   feedSize: number
+  /**
+   * ISO 3166-1 region the search and the popularity chart are asked about.
+   *
+   * Without it YouTube infers a region from the caller's address, which for a Worker is
+   * whichever Cloudflare edge took the request — not where the person watching lives.
+   */
+  region: string
+  /**
+   * ISO 639-1 language the search is biased toward, and the script the explore lane
+   * writes its queries in. A relevance bias, not a filter: content in other languages
+   * still appears.
+   */
+  language: string
   /** "Known to Explore" slider in [0, 1] (design section 38). */
   discovery: number
   /** Maximum videos from one channel per feed (design section 35). */

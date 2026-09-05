@@ -1,6 +1,6 @@
 # Verification run
 
-Recorded 2026/8/24 18:22:14 JST by `node tools/verify-screenshots.mjs`, against `wrangler dev --local`
+Recorded 2026/8/24 19:20:34 JST by `node tools/verify-screenshots.mjs`, against `wrangler dev --local`
 with a seeded catalog and no external credentials.
 
 ## 1-feed
@@ -11,7 +11,7 @@ The feed, ranked without a trained model: every candidate scores at the pool mea
 
 ## 2-rated
 
-Rated "Page cache, end to end" four out of five. The card updates in place rather than re-ranking under the cursor.
+Rated "How Firefox paints a frame" four out of five. The card updates in place rather than re-ranking under the cursor.
 
 ![2-rated](2-rated.png)
 
@@ -35,6 +35,6 @@ What is configured and what is not. Runpod and Access are absent in a local run,
 
 ## 6-video
 
-"How Firefox paints a frame" with the YouTube player, the rating question and the reasons the score was what it was.
+"The event loop, honestly" with the YouTube player, the rating question and the reasons the score was what it was.
 
 ![6-video](6-video.png)

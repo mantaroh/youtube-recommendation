@@ -1,4 +1,4 @@
-import type { EpochMillis, Lane, SourceItem } from '@ypr/domain'
+import type { AppSettings, EpochMillis, Lane, SourceItem } from '@ypr/domain'
 import {
   DISCOVERY_INTEREST_CLUSTERS,
   DISCOVERY_QUERIES_PER_INTEREST,
@@ -7,6 +7,7 @@ import {
 import type { Env } from '../../env.js'
 import { splitList } from '../../env.js'
 import { recordUsage, SearchBudget } from '../../db/quota.js'
+import { loadSettings } from '../../db/settings.js'
 import {
   channelsFromItems,
   listChannelsToRefresh,
@@ -66,17 +67,30 @@ export async function runDiscovery(
     summaries.push(await discoverSubscriptions(env, now, options))
   }
 
+  const settings = await loadSettings(env.DB, profileId)
+
   if (lanes.includes('related') || lanes.includes('explore')) {
     const seeds = await seedTerms(env.DB, profileId)
 
     if (lanes.includes('related')) {
       const terms = seeds.slice(0, DISCOVERY_QUERIES_PER_INTEREST * 2)
-      summaries.push(await discoverBySearch(env, 'related', terms, budget, now, options))
+      summaries.push(await discoverBySearch(env, 'related', terms, budget, now, settings, options))
     }
 
     if (lanes.includes('explore')) {
-      const terms = adjacentTopics(seeds, DISCOVERY_QUERIES_PER_INTEREST)
-      summaries.push(await discoverBySearch(env, 'explore', terms, budget, now, options))
+      // The neighbour is the search query, so it has to be written in the language the
+      // user actually watches. Seeds are often English even for a Japanese viewer,
+      // because tags frequently are, which is why the setting decides rather than the
+      // seeds alone.
+      const preferred = settings.language === 'ja' ? 'ja' : 'latin'
+      const terms = adjacentTopics(seeds, DISCOVERY_QUERIES_PER_INTEREST, preferred)
+      summaries.push(await discoverBySearch(env, 'explore', terms, budget, now, settings, options))
+
+      // The popularity chart costs one unit per region and category and no search call
+      // at all, so it runs alongside the searches rather than instead of them. It is
+      // also the only pass that works before anything has been rated: without it a new
+      // installation discovers nothing until the first ratings exist.
+      summaries.push(await discoverPopular(env, settings, now, options))
     }
   }
 
@@ -150,12 +164,74 @@ export async function discoverSubscriptions(
   return summary
 }
 
+/**
+ * The public popularity chart for the user's own region (design section 42's cheap half).
+ *
+ * A `videos.list` call with a `chart` parameter, so it costs one unit and never touches
+ * the search allowance. It asks nothing about anyone's preferences — which is what makes
+ * it the right pass to run when there are no preferences yet.
+ */
+export async function discoverPopular(
+  env: Env,
+  settings: AppSettings,
+  now: EpochMillis,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<DiscoverySummary> {
+  const summary: DiscoverySummary = {
+    lane: 'explore',
+    queries: [],
+    found: 0,
+    stored: 0,
+    searchCalls: 0,
+    listCalls: 0,
+    errors: [],
+  }
+
+  const credentials = await youtubeCredentials(env, now, options.fetchImpl)
+  if (!credentials.apiKey && !credentials.accessToken) {
+    summary.errors.push('no YouTube credentials configured')
+    return summary
+  }
+
+  const client = new YouTubeClient({
+    ...credentials,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  })
+
+  // The configured region first, then whatever else `CRAWL_REGIONS` lists. Ordering
+  // matters because the two overlap heavily and the first pass is the one whose videos
+  // are stored with the earlier `discovered_at`.
+  const regions = [settings.region, ...splitList(env.CRAWL_REGIONS, [])].filter(
+    (region, index, all) => all.indexOf(region) === index,
+  )
+  const categories = splitList(env.CRAWL_CATEGORIES, ['28'])
+
+  const items: SourceItem[] = []
+  for (const region of regions) {
+    for (const category of categories) {
+      summary.queries.push(`${region}/${category}`)
+      try {
+        items.push(...(await client.listMostPopular(region, category)))
+      } catch (error) {
+        summary.errors.push(`${region}/${category}: ${describe(error)}`)
+      }
+    }
+  }
+
+  summary.found = items.length
+  summary.stored = await store(env, items, 'explore', `chart:${regions.join(',')}`)
+  summary.listCalls = client.tally.list
+  await recordUsage(env.DB, 'list', client.tally.list, now)
+  return summary
+}
+
 async function discoverBySearch(
   env: Env,
   lane: Lane,
   terms: string[],
   budget: SearchBudget,
   now: EpochMillis,
+  settings: AppSettings,
   options: { fetchImpl?: typeof fetch } = {},
 ): Promise<DiscoverySummary> {
   const summary: DiscoverySummary = {
@@ -200,6 +276,11 @@ async function discoverBySearch(
         // topic the user has never rated returns the same canonical videos every run.
         order: lane === 'explore' ? 'date' : 'relevance',
         publishedAfter: new Date(now - 90 * 86_400_000).toISOString(),
+        // Both are relevance biases, not filters, so content in other languages still
+        // appears. Omitting them lets YouTube infer a region from the caller's address,
+        // which for a Worker is whichever Cloudflare edge took the request.
+        regionCode: settings.region,
+        relevanceLanguage: settings.language,
       })
       for (const id of found) ids.add(id)
     } catch (error) {

@@ -1,4 +1,5 @@
 import type { EpochMillis, Source } from '@ypr/domain'
+import { boundFetch } from '../../http.js'
 
 /**
  * Google OAuth, and the storage of what it returns (design section 16).
@@ -49,8 +50,18 @@ export function authorizationUrl(config: OAuthConfig, state: string): string {
   // Without it the connection would quietly stop working after an hour.
   url.searchParams.set('access_type', 'offline')
   url.searchParams.set('prompt', 'consent')
-  url.searchParams.set('include_granted_scopes', 'true')
   url.searchParams.set('state', state)
+
+  // Note what is *not* set: `include_granted_scopes`. Incremental authorisation folds
+  // every scope the user has already granted this client into the request, and Google
+  // refuses to issue a YouTube scope in the same request as a Drive one — so a client
+  // that has been used for anything else fails with `invalid_request` before the
+  // consent screen appears.
+  //
+  // Nothing here wants it either. This system asks for exactly one scope and calls
+  // exactly one method with it, so a token carrying other grants would be strictly
+  // more access than the design permits (design section 16).
+
   return url.toString()
 }
 
@@ -67,7 +78,7 @@ export async function exchangeCode(
   config: OAuthConfig,
   code: string,
   now: EpochMillis,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = boundFetch(),
 ): Promise<StoredToken> {
   const payload = await postToken(
     {
@@ -92,7 +103,7 @@ export async function refreshToken(
   config: OAuthConfig,
   refresh: string,
   now: EpochMillis,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = boundFetch(),
 ): Promise<StoredToken> {
   const payload = await postToken(
     {
@@ -280,7 +291,7 @@ export async function accessTokenFor(
   source: Source,
   config: OAuthConfig,
   now: EpochMillis,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = boundFetch(),
 ): Promise<string | null> {
   const stored = await loadToken(db, profileId, source, config.encryptionKey)
   if (!stored) return null

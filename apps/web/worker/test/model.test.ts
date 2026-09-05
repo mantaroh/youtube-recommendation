@@ -12,7 +12,7 @@ import {
   unscoredVideoIds,
 } from '../db/models.js'
 import { createJob, findJobByHash, markFailed, markSubmitted, payloadHash } from '../db/jobs.js'
-import { buildTrainingSet, submitTraining } from '../services/model/train.js'
+import { MIN_TRAINING_EVENTS, buildTrainingSet, submitTraining } from '../services/model/train.js'
 import { submitScoring } from '../services/model/score.js'
 import { reconcileJobs } from '../services/model/reconcile.js'
 import { videoText } from '../services/model/text.js'
@@ -149,13 +149,13 @@ describe('submitting a training run', () => {
 
   it('creates a version, queues a job, and records the Runpod id', async () => {
     const db = createTestDatabase()
-    await seedRatings(db, 12)
+    await seedRatings(db, MIN_TRAINING_EVENTS + 2)
     const fetchImpl = stubFetch([['/run', { id: 'runpod-1' }]])
 
     const submission = await submitTraining(envWith(db), 'default', NOW, { fetchImpl })
 
     expect(submission.modelVersion).toBe('model-1')
-    expect(submission.eventCount).toBe(12)
+    expect(submission.eventCount).toBe(MIN_TRAINING_EVENTS + 2)
 
     const versions = await listModelVersions(db, 'default')
     expect(versions[0]?.status).toBe('training')
@@ -167,7 +167,7 @@ describe('submitting a training run', () => {
     // Design section 47: a second press of "retrain" with nothing rated in between is
     // work already in flight.
     const db = createTestDatabase()
-    await seedRatings(db, 12)
+    await seedRatings(db, MIN_TRAINING_EVENTS + 2)
     const fetchImpl = stubFetch([['/run', { id: 'runpod-1' }]])
 
     const first = await submitTraining(envWith(db), 'default', NOW, { fetchImpl })
@@ -217,7 +217,7 @@ describe('reconciling a finished job', () => {
   it('activates the model only when training has actually succeeded', async () => {
     const db = createTestDatabase()
     const version = await createModelVersion(db, {
-      id: 'm1', profileId: 'default', version: 1, trainingEventCount: 12, now: NOW,
+      id: 'm1', profileId: 'default', version: 1, trainingEventCount: MIN_TRAINING_EVENTS + 2, now: NOW,
     })
     await createJob(db, {
       id: 'j1',
@@ -235,7 +235,7 @@ describe('reconciling a finished job', () => {
         output: {
           modelVersion: 'model-1',
           modelPath: '/runpod-volume/model-1.pt',
-          trainedEventCount: 12,
+          trainedEventCount: MIN_TRAINING_EVENTS + 2,
           trainedSeconds: 42,
         },
       }],
@@ -252,7 +252,7 @@ describe('reconciling a finished job', () => {
 
   it('marks the version failed when the run failed, leaving the old model live', async () => {
     const db = createTestDatabase()
-    await createModelVersion(db, { id: 'm1', profileId: 'default', version: 1, trainingEventCount: 12, now: NOW })
+    await createModelVersion(db, { id: 'm1', profileId: 'default', version: 1, trainingEventCount: MIN_TRAINING_EVENTS + 2, now: NOW })
     await activateModel(db, 'default', 'm1', NOW)
     const next = await createModelVersion(db, {
       id: 'm2', profileId: 'default', version: 2, trainingEventCount: 20, now: NOW,

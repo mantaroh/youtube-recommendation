@@ -1,6 +1,7 @@
 import type { EpochMillis } from '@ypr/domain'
 import { DEFAULT_PROFILE_ID } from '@ypr/domain'
 import type { Env } from '../../env.js'
+import { boundFetch } from '../../http.js'
 import { accessTokenFor, type OAuthConfig } from './oauth.js'
 
 /**
@@ -47,7 +48,7 @@ export async function youtubeCredentials(
   const config = oauthConfig(env)
   if (config) {
     try {
-      const token = await accessTokenFor(env.DB, profileId, 'youtube', config, now, fetchImpl ?? fetch)
+      const token = await accessTokenFor(env.DB, profileId, 'youtube', config, now, boundFetch(fetchImpl))
       if (token) credentials.accessToken = token
     } catch {
       // A refresh that fails leaves the key path working. Subscriptions will report

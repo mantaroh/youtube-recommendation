@@ -17,10 +17,12 @@ import json
 import sys
 from pathlib import Path
 
+from adapter.console import use_utf8_io
 from adapter.dispatch import dispatch
 
 
 def main(argv: list[str] | None = None) -> int:
+    use_utf8_io()
     parser = argparse.ArgumentParser(description="Run one Anagnorisis operation locally")
     parser.add_argument("--file", type=Path, help="request JSON; defaults to stdin")
     parser.add_argument(

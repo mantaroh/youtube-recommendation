@@ -16,7 +16,12 @@ import os
 from typing import Any
 
 from adapter.anagnorisis_engine import AnagnorisisEngine
+from adapter.console import use_utf8_io
 from adapter.dispatch import dispatch
+
+# Before the engine is built, because building it is what spawns the subprocesses that
+# inherit the console encoding.
+use_utf8_io()
 
 _engine = AnagnorisisEngine()
 

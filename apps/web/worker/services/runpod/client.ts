@@ -5,6 +5,7 @@ import type {
   RunpodOperation,
   RunpodPayload,
 } from '@ypr/domain'
+import { boundFetch } from '../../http.js'
 
 /**
  * The Runpod Serverless endpoint (design sections 22, 28 and 29).
@@ -23,6 +24,18 @@ const API_ROOT = 'https://api.runpod.ai/v2'
 export interface RunpodConfig {
   apiKey: string
   endpointId: string
+  /**
+   * Where the engine lives, when it is not Runpod.
+   *
+   * The GPU service speaks one envelope and three routes — `/run`, `/status/{id}`,
+   * `/cancel/{id}` — none of which is Runpod-specific. Pointing this at a process on
+   * the developer's own machine therefore changes nothing above this file: the job
+   * ledger, the polling pass and the atomic model switch all behave identically,
+   * which is the point of testing against it at all.
+   *
+   * `PREFERENCE_ENGINE_URL` in the environment; unset means Runpod.
+   */
+  baseUrl?: string
   fetchImpl?: typeof fetch
 }
 
@@ -40,7 +53,7 @@ export class RunpodClient {
   private readonly fetchImpl: typeof fetch
 
   constructor(private readonly config: RunpodConfig) {
-    this.fetchImpl = config.fetchImpl ?? fetch
+    this.fetchImpl = boundFetch(config.fetchImpl)
   }
 
   /** Queue a job. Returns the Runpod job id; the result is collected later. */
@@ -61,10 +74,9 @@ export class RunpodClient {
   }
 
   async status<TOutput>(runpodJobId: string): Promise<RunpodJobStatus<TOutput>> {
-    const response = await this.fetchImpl(
-      `${API_ROOT}/${this.config.endpointId}/status/${runpodJobId}`,
-      { headers: this.headers() },
-    )
+    const response = await this.fetchImpl(`${this.root()}/status/${runpodJobId}`, {
+      headers: this.headers(),
+    })
     if (!response.ok) {
       throw new RunpodError(`status ${response.status}: ${await response.text()}`, response.status)
     }
@@ -72,14 +84,27 @@ export class RunpodClient {
   }
 
   async cancel(runpodJobId: string): Promise<void> {
-    await this.fetchImpl(`${API_ROOT}/${this.config.endpointId}/cancel/${runpodJobId}`, {
+    await this.fetchImpl(`${this.root()}/cancel/${runpodJobId}`, {
       method: 'POST',
       headers: this.headers(),
     })
   }
 
+  /**
+   * Where requests go.
+   *
+   * A local engine is addressed directly; Runpod nests every endpoint under its id.
+   * Trailing slashes are trimmed so that both `http://host:9000` and
+   * `http://host:9000/` behave the same, which is the sort of difference that
+   * otherwise shows up as a 404 an hour later.
+   */
+  private root(): string {
+    if (this.config.baseUrl) return this.config.baseUrl.replace(/\/+$/, '')
+    return `${API_ROOT}/${this.config.endpointId}`
+  }
+
   private async post<T>(path: string, body: unknown): Promise<T> {
-    const response = await this.fetchImpl(`${API_ROOT}/${this.config.endpointId}/${path}`, {
+    const response = await this.fetchImpl(`${this.root()}/${path}`, {
       method: 'POST',
       headers: { ...this.headers(), 'content-type': 'application/json' },
       body: JSON.stringify(body),

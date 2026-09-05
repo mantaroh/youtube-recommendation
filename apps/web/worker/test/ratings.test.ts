@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { IMPRESSION_WINDOW_MS } from '@ypr/domain'
 import {
   appendRating,
   countRatingsSince,
@@ -121,20 +122,71 @@ describe('rating events', () => {
 })
 
 describe('impressions', () => {
-  it('counts repeat showings so the penalty can grow', async () => {
+  it('counts showings on separate occasions so the penalty can grow', async () => {
     const db = createTestDatabase()
     await seedVideo(db, { id: 'youtube:a' })
 
     const entry = [{ videoId: 'youtube:a', lane: 'subscription' as const }]
-    await recordImpressions(db, 'default', entry, 1_000)
-    await recordImpressions(db, 'default', entry, 2_000)
+    // Separate occasions, not separate renders: the gap has to exceed the window, or
+    // this is one sitting. See `the impression window` below.
+    const start = 1_700_000_000_000
+    await recordImpressions(db, 'default', entry, start)
+    await recordImpressions(db, 'default', entry, start + IMPRESSION_WINDOW_MS + 1)
+    await recordImpressions(db, 'default', entry, start + 2 * IMPRESSION_WINDOW_MS + 2)
 
-    expect((await seenCounts(db, 'default')).get('youtube:a')).toBe(2)
+    expect((await seenCounts(db, 'default')).get('youtube:a')).toBe(3)
   })
 
   it('records nothing for an empty feed', async () => {
     const db = createTestDatabase()
     await recordImpressions(db, 'default', [], 1_000)
     expect((await seenCounts(db, 'default')).size).toBe(0)
+  })
+})
+
+describe('the impression window', () => {
+  it('counts one showing however many times the feed is reopened', async () => {
+    // Opening a video and pressing back used to count as a fresh showing of everything
+    // on screen, so the seen penalty demoted it and the feed reordered itself as a
+    // consequence of being read.
+    const db = createTestDatabase()
+    await seedVideo(db, { id: 'youtube:a' })
+    const entry = [{ videoId: 'youtube:a', lane: 'subscription' as const }]
+
+    const start = 1_700_000_000_000
+    for (const at of [start, start + 1_000, start + 60_000, start + 600_000]) {
+      await recordImpressions(db, 'default', entry, at)
+    }
+
+    expect((await seenCounts(db, 'default')).get('youtube:a')).toBe(1)
+  })
+
+  it('counts again once the window has passed', async () => {
+    const db = createTestDatabase()
+    await seedVideo(db, { id: 'youtube:a' })
+    const entry = [{ videoId: 'youtube:a', lane: 'subscription' as const }]
+
+    const start = 1_700_000_000_000
+    await recordImpressions(db, 'default', entry, start)
+    await recordImpressions(db, 'default', entry, start + IMPRESSION_WINDOW_MS + 1)
+
+    expect((await seenCounts(db, 'default')).get('youtube:a')).toBe(2)
+  })
+
+  it('does not let repeat views push the window forward forever', async () => {
+    // If `shown_at` advanced on an uncounted view, a reader who reopened the feed every
+    // few minutes would never accumulate a second impression at all.
+    const db = createTestDatabase()
+    await seedVideo(db, { id: 'youtube:a' })
+    const entry = [{ videoId: 'youtube:a', lane: 'subscription' as const }]
+
+    const start = 1_700_000_000_000
+    await recordImpressions(db, 'default', entry, start)
+    for (let minute = 1; minute <= 10; minute += 1) {
+      await recordImpressions(db, 'default', entry, start + minute * 60_000)
+    }
+    await recordImpressions(db, 'default', entry, start + IMPRESSION_WINDOW_MS + 1)
+
+    expect((await seenCounts(db, 'default')).get('youtube:a')).toBe(2)
   })
 })

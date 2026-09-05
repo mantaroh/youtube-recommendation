@@ -45,6 +45,16 @@ describe('the authorization request', () => {
     expect(url.searchParams.get('prompt')).toBe('consent')
     expect(url.searchParams.get('state')).toBe('state-1')
   })
+
+  it('does not ask for scopes the user granted this client for something else', () => {
+    // `include_granted_scopes` folds in every prior grant, and Google refuses to issue
+    // a YouTube scope alongside a Drive one: a client that has been used for anything
+    // else then fails with `invalid_request` before the consent screen appears.
+    const url = new URL(authorizationUrl(CONFIG, 'state-1'))
+    expect(url.searchParams.get('include_granted_scopes')).toBeNull()
+    // One scope requested, one scope used.
+    expect(url.searchParams.get('scope')?.split(' ')).toHaveLength(1)
+  })
 })
 
 describe('encryption at rest', () => {

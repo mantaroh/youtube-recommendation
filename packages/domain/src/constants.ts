@@ -32,6 +32,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   laneMix: DEFAULT_LANE_MIX,
   /** 50 items, matching the worked example in design section 34. */
   feedSize: 50,
+  // The system reports in JST throughout, so its default audience is in Japan. Both
+  // are settings rather than constants, because that default is an assumption about
+  // one installation and not a property of the design.
+  region: 'JP',
+  language: 'ja',
   discovery: 0.5,
   /** No more than 3 videos from one channel per 20 shown (design section 35). */
   maxPerChannel: 3,
@@ -39,6 +44,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   retrainAfterRatings: 20,
   retrainAfterDays: 7,
 }
+
+/**
+ * How long before showing a video again counts as showing it again.
+ *
+ * The `seen_penalty` exists to stop the same video being offered day after day
+ * (design section 33). Counting every render instead means that opening a video and
+ * pressing back demotes everything that was on screen — the penalty fires on ordinary
+ * navigation rather than on the passage of days, and the feed shuffles under the
+ * reader for no reason they can see.
+ *
+ * Six hours: long enough that a session of browsing counts once, short enough that
+ * tomorrow's feed still knows what yesterday's showed.
+ */
+export const IMPRESSION_WINDOW_MS = 6 * 3_600_000
 
 /** Design section 35 states the diversity rule per 20 items, not per feed. */
 export const DIVERSITY_WINDOW = 20
@@ -56,6 +75,23 @@ export const RESCORE_MAX_ITEMS = 2000
  * a retry without shortening the run, because the GPU work is linear in item count.
  */
 export const SCORE_BATCH_SIZE = 250
+
+/**
+ * Wall-clock ceiling on one training run.
+ *
+ * Upstream trains for 5001 epochs when given no limit, which on Runpod bills for every
+ * minute of it. But this ceiling is not only a cost control, and getting it wrong is
+ * not only expensive: **a run cut short still reports success.** It returns a model, a
+ * high training accuracy and a completed job, and that model can be a single constant
+ * — twelve ratings at a 240 second budget reached epoch 10 and predicted one number
+ * for everything, while the same twelve at 600 seconds reached epoch 44 and separated
+ * cleanly.
+ *
+ * Fifteen minutes is comfortable on a GPU and adequate on a CPU for a few hundred
+ * ratings. If training ever has to be capped tighter than this, treat the resulting
+ * model as suspect until something has checked that it discriminates.
+ */
+export const TRAIN_TIME_BUDGET_SECONDS = 900
 
 /** A failed GPU job is resubmitted at most this many times (design section 48). */
 export const MAX_JOB_ATTEMPTS = 3
