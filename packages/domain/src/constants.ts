@@ -71,10 +71,17 @@ export const RESCORE_MIN_ITEMS = 500
 export const RESCORE_MAX_ITEMS = 2000
 
 /**
- * One Runpod request carries at most this many items. Larger batches raise the cost of
- * a retry without shortening the run, because the GPU work is linear in item count.
+ * One engine request carries at most this many items. Larger batches raise the cost of
+ * a retry without shortening the run, because the work is linear in item count.
+ *
+ * A hundred rather than the original 250, once the linearity was measured rather than
+ * assumed. Embedding one video's text costs about 53ms per character on a CPU, and the
+ * text is around 1400 characters, so an item is roughly 74 seconds: 250 of them is over
+ * five hours, longer than the lease that is meant to cover a run and longer than a night
+ * a machine is left to work. At a hundred a batch takes a little over two hours, which
+ * fits inside both — and an interrupted batch throws away two hours rather than five.
  */
-export const SCORE_BATCH_SIZE = 250
+export const SCORE_BATCH_SIZE = 100
 
 /**
  * Wall-clock ceiling on one training run.

@@ -92,6 +92,7 @@ class AnagnorisisEngine(PreferenceEngine):
 
         paths = self._paths(profile)
         cfg = self._cfg(paths)
+        _keep_models_resident(cfg)
         started = time.monotonic()
 
         # The Worker sends the complete current training set, so last run's files are
@@ -152,7 +153,23 @@ class AnagnorisisEngine(PreferenceEngine):
         storage.activate(paths, model_version)
 
         cfg = self._cfg(paths)
-        return [float(api.score_text(item.text, cfg=cfg)) for item in items]
+        _keep_models_resident(cfg)
+
+        # Reported as it goes, not at the end. A batch is 250 items and each one embeds
+        # text before it can be scored, so a run that says nothing for an hour is
+        # indistinguishable from a run that has hung — and the only way to find out how
+        # long a batch takes is to watch a partial one.
+        scores: list[float] = []
+        started = time.monotonic()
+        for index, item in enumerate(items, start=1):
+            scores.append(float(api.score_text(item.text, cfg=cfg)))
+            if index == 1 or index % 10 == 0 or index == len(items):
+                elapsed = time.monotonic() - started
+                print(
+                    f"[score] {index}/{len(items)}  {elapsed:.0f}s  {elapsed / index:.1f}s/item",
+                    flush=True,
+                )
+        return scores
 
     def embed(self, profile: str, items: Sequence[Item]) -> tuple[list[list[float]], int]:
         if not items:
@@ -186,6 +203,41 @@ class AnagnorisisEngine(PreferenceEngine):
             body, _ = description.body_for_text(item.text, cfg=cfg, summarise=None)
             described.append(body or item.text)
         return described
+
+
+def _keep_models_resident(cfg, seconds: int = 7200) -> None:
+    """Stops upstream from unloading models between items.
+
+    Both the embedder and the evaluator run in subprocesses that a watchdog kills after
+    two minutes without a call, to free GPU memory. On a GPU that threshold is never
+    reached: an item embeds in seconds, so the next call always arrives first.
+
+    On a CPU it is reached on every single item. Embedding one video's text takes longer
+    than the timeout, and ``_execute`` holds its lock for the whole call, so from the
+    watchdog's side the evaluator has simply been idle — it is killed mid-batch and
+    reloaded for the next item. A measured run spent 81 seconds an item doing this, with
+    five subprocess restarts in the first ten items.
+
+    The embedder reads its timeout from configuration. The evaluator hardcodes it, so
+    the attribute is set directly on the singleton. That is reaching into upstream and it
+    can stop working silently if the name changes — which is why ``score`` prints its
+    rate as it goes: if the seconds an item do not fall, this stopped taking effect.
+    """
+    try:
+        from omegaconf import open_dict
+
+        with open_dict(cfg):
+            cfg.embedder.idle_timeout_seconds = seconds
+    except Exception:  # noqa: BLE001 - a stale attribute name must not fail the run
+        pass
+
+    try:
+        from anagnorisis_core.models.universal_evaluator import UniversalEvaluator
+
+        # A singleton: this is the same object `api.score_text` will use.
+        UniversalEvaluator()._idle_timeout = seconds
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class _AccuracyProbe:
