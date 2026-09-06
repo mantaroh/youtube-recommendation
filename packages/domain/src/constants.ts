@@ -121,7 +121,12 @@ export const MUTE_DAYS = 30
  * How long a claimed job stays the claimant's to finish.
  *
  * Longer than a training run is expected to take, so a slow machine is not treated as a
- * dead one. Thirty minutes is a guess until there are enough ratings to measure a real
- * run; the number is here rather than inline so that correcting it is one edit.
+ * dead one. Thirty minutes was a guess; the first real run on a CPU spent forty-four
+ * minutes loading the embedding weights and had not started training, so the guess was
+ * short enough to have expired mid-run and thrown the work away.
+ *
+ * Three hours is deliberately generous. The cost of a lease that is too long is waiting
+ * before a genuinely dead claim is retried; the cost of one that is too short is losing
+ * a run that was going to succeed. On a queue this size the first is barely a cost.
  */
-export const JOB_LEASE_MINUTES = 30
+export const JOB_LEASE_MINUTES = 180
