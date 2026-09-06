@@ -215,7 +215,6 @@ awake whenever the Worker decides to call. The runner inverts that: nothing list
 nothing is exposed, and this machine decides when it is free enough.
 
 ```bash
-set ENGINE_PULL_TOKEN=...
 python tools/pull_runner.py --url https://yt.mantaroh.com --volume ./volume \
     --window 01:00-07:00
 ```
@@ -223,8 +222,13 @@ python tools/pull_runner.py --url https://yt.mantaroh.com --volume ./volume \
 The window is local time, and may cross midnight (`23:00-05:00`). `--once` takes at most
 one job and stops, which is the way to try it before leaving it running.
 
-The token comes from the environment rather than an argument, so it stays out of shell
-history and out of the process list. On the Worker side, setting `ENGINE_PULL_TOKEN`
+Credentials come from `engine-credentials.env` at the repository root, which is
+git-ignored, or from the environment, which overrides it. Neither is an argument, so
+neither ends up in shell history or a process list.
+
+The file holds three values: `ENGINE_PULL_TOKEN`, which the Worker checks, and
+`CF_ACCESS_CLIENT_ID` with `CF_ACCESS_CLIENT_SECRET`, which are the Cloudflare Access
+service token that gets the request past the edge in the first place. On the Worker side, setting `ENGINE_PULL_TOKEN`
 is what puts the system in this mode: jobs are then left in the ledger instead of being
 submitted anywhere.
 

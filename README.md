@@ -58,7 +58,7 @@ model, follow [`services/anagnorisis-worker/README.md`](services/anagnorisis-wor
 The Python side has its own tests:
 
 ```bash
-cd services/anagnorisis-worker && python -m pytest tests -q   # 29 tests
+cd services/anagnorisis-worker && python -m pytest tests -q   # 35 tests
 ```
 
 ## How it works

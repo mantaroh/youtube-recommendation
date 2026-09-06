@@ -34,3 +34,6 @@ youtube-oauth-key.txt
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Runner credentials: the worker bearer token and the Access service token.
+engine-credentials.env

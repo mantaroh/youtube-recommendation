@@ -65,10 +65,55 @@ def parse_window(text: str | None) -> Window | None:
     return Window(start, end)
 
 
+def read_credentials(path: Path | None) -> dict[str, str]:
+    """Loads `KEY=VALUE` lines, if the file is there.
+
+    A file rather than three environment variables because that is how these arrive:
+    Cloudflare shows a service token's secret once, and copying it into a git-ignored
+    file is fewer chances to put it somewhere it will be kept. The environment still
+    wins, so a one-off run can override without editing anything.
+    """
+    values: dict[str, str] = {}
+    if path and path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            values[key.strip()] = value.strip().strip("\"'")
+    for key in ("ENGINE_PULL_TOKEN", "CF_ACCESS_CLIENT_ID", "CF_ACCESS_CLIENT_SECRET"):
+        from_environment = os.environ.get(key)
+        if from_environment:
+            values[key] = from_environment
+    return values
+
+
+def build_headers(credentials: dict[str, str]) -> dict[str, str]:
+    """The headers every request carries.
+
+    Two layers, and both are wanted. The service token is what gets past Cloudflare
+    Access at the edge, so a request without it never reaches the Worker at all. The
+    bearer token is what the Worker itself checks, so a mistake in the Access
+    configuration — an application scoped to the wrong path, say — does not leave the
+    routes open.
+    """
+    headers = {
+        "Authorization": f"Bearer {credentials['ENGINE_PULL_TOKEN']}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    client_id = credentials.get("CF_ACCESS_CLIENT_ID")
+    client_secret = credentials.get("CF_ACCESS_CLIENT_SECRET")
+    if client_id and client_secret:
+        headers["CF-Access-Client-Id"] = client_id
+        headers["CF-Access-Client-Secret"] = client_secret
+    return headers
+
+
 class WorkerApi:
-    def __init__(self, base_url: str, token: str, timeout: float = 60.0) -> None:
+    def __init__(self, base_url: str, headers: dict[str, str], timeout: float = 60.0) -> None:
         self.base_url = base_url.rstrip("/")
-        self.token = token
+        self.headers = headers
         self.timeout = timeout
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
@@ -77,11 +122,7 @@ class WorkerApi:
             f"{self.base_url}{path}",
             data=data,
             method=method,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+            headers=self.headers,
         )
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             payload = response.read().decode("utf-8")
@@ -131,15 +172,29 @@ def main() -> int:
     parser.add_argument("--window", help="local-time hours to work in, e.g. 01:00-07:00")
     parser.add_argument("--poll", type=int, default=300, help="seconds between checks")
     parser.add_argument("--once", action="store_true", help="take at most one job, then stop")
+    parser.add_argument(
+        "--credentials",
+        type=Path,
+        default=Path(__file__).resolve().parents[3] / "engine-credentials.env",
+        help="KEY=VALUE file holding the tokens; the environment overrides it",
+    )
     arguments = parser.parse_args()
 
-    token = os.environ.get("ENGINE_PULL_TOKEN")
-    if not token:
-        print("ENGINE_PULL_TOKEN is not set", file=sys.stderr)
+    credentials = read_credentials(arguments.credentials)
+    if not credentials.get("ENGINE_PULL_TOKEN"):
+        print(
+            f"no ENGINE_PULL_TOKEN, in the environment or in {arguments.credentials}",
+            file=sys.stderr,
+        )
         return 2
 
+    if not credentials.get("CF_ACCESS_CLIENT_ID"):
+        # Not fatal: a deployment behind a Bypass policy needs no service token. Worth
+        # saying, though, because the symptom otherwise is a 302 that looks like nothing.
+        print("no service token set; expect a redirect if Access protects this path", file=sys.stderr)
+
     window = parse_window(arguments.window)
-    api = WorkerApi(arguments.url, token)
+    api = WorkerApi(arguments.url, build_headers(credentials))
 
     arguments.volume.mkdir(parents=True, exist_ok=True)
     # Imported here rather than at the top: it pulls in torch, which takes seconds and
