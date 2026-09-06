@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Personal Recommender">
+  <!--
+    A play triangle on the application's own blue.
+
+    The triangle is a functional symbol for playback and is used by every player, so it
+    carries no one's mark. What identifies YouTube is the combination of its red, the
+    wide rounded rectangle and the centred white triangle; the colour and the proportions
+    here are the application's own, which is what keeps this a video icon rather than an
+    imitation of that one.
+  -->
+  <rect width="64" height="64" rx="15" fill="#2f6feb"/>
+  <path d="M26 20.5 L45 32 L26 43.5 Z" fill="#ffffff"/>
+</svg>
