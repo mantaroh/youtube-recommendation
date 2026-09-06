@@ -39,7 +39,7 @@ configured at all.
 
 ```bash
 pnpm install
-pnpm test                                   # 107 tests
+pnpm test                                   # 160 tests
 pnpm typecheck
 
 cd apps/web
@@ -58,7 +58,7 @@ model, follow [`services/anagnorisis-worker/README.md`](services/anagnorisis-wor
 The Python side has its own tests:
 
 ```bash
-cd services/anagnorisis-worker && python -m pytest tests -q   # 25 tests
+cd services/anagnorisis-worker && python -m pytest tests -q   # 29 tests
 ```
 
 ## How it works

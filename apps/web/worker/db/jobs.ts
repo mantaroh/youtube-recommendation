@@ -21,6 +21,7 @@ interface JobRow {
   error: string | null
   attempts: number
   context_json: string | null
+  lease_expires_at: number | null
 }
 
 function toGpuJob(row: JobRow): GpuJob {
@@ -43,6 +44,7 @@ function toGpuJob(row: JobRow): GpuJob {
     completedAt: row.completed_at,
     error: row.error,
     attempts: row.attempts,
+    leaseExpiresAt: row.lease_expires_at,
     context,
   }
 }
@@ -111,6 +113,7 @@ export async function createJob(
     completedAt: null,
     error: null,
     attempts: 0,
+    leaseExpiresAt: null,
     context: input.context,
   }
 }
@@ -197,4 +200,75 @@ export async function listJobs(db: D1Database, limit = 50): Promise<GpuJob[]> {
 export async function getJob(db: D1Database, id: string): Promise<GpuJob | null> {
   const row = await db.prepare('SELECT * FROM gpu_jobs WHERE id = ?1').bind(id).first<JobRow>()
   return row ? toGpuJob(row) : null
+}
+
+/**
+ * Takes the oldest queued job, in one statement.
+ *
+ * D1 has no row locks, so reading a row and then updating it leaves a window in which
+ * two runners see the same job as available. Doing both in one `UPDATE ... RETURNING`
+ * closes it: SQLite applies a statement atomically, so exactly one caller can be the
+ * one that changed the row from `queued`.
+ *
+ * `attempts` rises here rather than at submission, because in this model a claim *is*
+ * the attempt.
+ */
+export async function claimNextJob(
+  db: D1Database,
+  options: { now: EpochMillis; leaseMs: number },
+): Promise<GpuJob | null> {
+  const row = await db
+    .prepare(
+      `UPDATE gpu_jobs
+          SET status = 'processing',
+              started_at = COALESCE(started_at, ?1),
+              lease_expires_at = ?2,
+              attempts = attempts + 1
+        WHERE id = (
+                SELECT id FROM gpu_jobs
+                 WHERE status = 'queued'
+                 ORDER BY created_at ASC
+                 LIMIT 1
+              )
+          AND status = 'queued'
+       RETURNING *`,
+    )
+    .bind(options.now, options.now + options.leaseMs)
+    .first<JobRow>()
+
+  return row ? toGpuJob(row) : null
+}
+
+/**
+ * Returns work whose claimant went away.
+ *
+ * A runner that is switched off mid-job never reports anything, so without this the row
+ * stays `processing` and the work is never done. `attempts` is left where it is, so a
+ * job that keeps being claimed by a machine that keeps dying still runs out of attempts
+ * rather than cycling forever.
+ */
+export async function expireLeases(db: D1Database, now: EpochMillis): Promise<number> {
+  const result = await db
+    .prepare(
+      `UPDATE gpu_jobs
+          SET status = 'queued', lease_expires_at = NULL
+        WHERE status = 'processing'
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at <= ?1`,
+    )
+    .bind(now)
+    .run()
+  return result.meta?.changes ?? 0
+}
+
+/** Puts a failed job back in the queue for a runner to pick up again. */
+export async function requeue(db: D1Database, id: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE gpu_jobs
+          SET status = 'queued', lease_expires_at = NULL, error = NULL, completed_at = NULL
+        WHERE id = ?1`,
+    )
+    .bind(id)
+    .run()
 }

@@ -6,6 +6,7 @@ import { ensureProfile } from './db/settings.js'
 import type { AppBindings } from './routes/types.js'
 import { authRoutes } from './routes/auth.js'
 import { dataRoutes } from './routes/data.js'
+import { engineRoutes } from './routes/engine.js'
 import { discoveryRoutes } from './routes/discovery.js'
 import { feedRoutes } from './routes/feed.js'
 import { jobRoutes } from './routes/jobs.js'
@@ -33,6 +34,11 @@ const app = new Hono<AppBindings>()
  * would put the one genuinely dangerous route outside the protection.
  */
 app.use('/api/*', async (context, next) => {
+  // The runner has no browser and therefore no Access session. Its three routes carry
+  // their own bearer check instead (see routes/engine.ts), which is the one hole in
+  // Access's coverage and is kept as small as it can be.
+  if (context.req.path.startsWith('/api/engine/')) return next()
+
   const result = await verifyAccess(context.req.raw, context.env)
   if (!result.ok) {
     return context.json({ error: 'forbidden', reason: result.reason }, 403)
@@ -61,6 +67,7 @@ app.route('/api', discoveryRoutes)
 app.route('/api', jobRoutes)
 app.route('/api', authRoutes)
 app.route('/api', dataRoutes)
+app.route('/api', engineRoutes)
 
 
 app.get('/api/health', (context) => context.json({ ok: true }))

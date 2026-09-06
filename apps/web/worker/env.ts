@@ -23,6 +23,13 @@ export interface Env {
   RUNPOD_API_KEY?: string
   RUNPOD_ENDPOINT_ID?: string
   /**
+   * Bearer token a runner presents to collect jobs (`docs/design/pull-engine.ja.md`).
+   *
+   * Setting it puts the system in pull mode: nothing is submitted anywhere, and jobs
+   * wait in the ledger until someone comes for them.
+   */
+  ENGINE_PULL_TOKEN?: string
+  /**
    * An engine somewhere other than Runpod, e.g. `http://127.0.0.1:9000`.
    *
    * The GPU service speaks one envelope and three routes, none of them Runpod's own,

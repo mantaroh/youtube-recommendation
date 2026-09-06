@@ -4,27 +4,60 @@ import { RunpodClient } from './client.js'
 /**
  * Which engine to talk to, decided in one place.
  *
- * Two deployments answer the same three routes with the same envelope: Runpod
- * Serverless, and the container run directly (`services/anagnorisis-worker/serve.py`).
- * Everything above this file submits jobs and polls a ledger without knowing which is
- * behind it, which is the property that makes the local one worth having — the job
- * pipeline being exercised is the real one, not a simulation of it.
+ * Three deployments answer the same work in three different shapes:
+ *
+ * - **runpod** — Runpod Serverless, reached over its own API.
+ * - **local** — the same container run directly (`services/anagnorisis-worker/serve.py`),
+ *   reached at a plain address. Everything above this file submits jobs and polls a
+ *   ledger without knowing which of the two is behind it, which is what makes the local
+ *   one worth having: the pipeline being exercised is the real one.
+ * - **pull** — nothing is reached at all. Jobs are left in the ledger and a runner comes
+ *   and takes them (`docs/design/pull-engine.ja.md`). This is the mode for a machine
+ *   that is not always on and should not be reachable from outside.
  */
 
-export const ENGINE_NOT_CONFIGURED =
-  'no preference engine configured: set PREFERENCE_ENGINE_URL for a local engine, ' +
-  'or RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID for Runpod'
+export type EngineMode = 'pull' | 'local' | 'runpod' | 'none'
 
-export function engineConfigured(env: Env): boolean {
-  if (env.PREFERENCE_ENGINE_URL) return true
-  return Boolean(env.RUNPOD_API_KEY && env.RUNPOD_ENDPOINT_ID)
+export const ENGINE_NOT_CONFIGURED =
+  'no preference engine configured: set ENGINE_PULL_TOKEN to let a runner collect jobs, ' +
+  'PREFERENCE_ENGINE_URL for a local engine, or RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID for Runpod'
+
+/**
+ * Pull wins when more than one is configured.
+ *
+ * The combination is a misconfiguration rather than a choice, and of the two readings
+ * the safe one is to wait for a runner: submitting to an endpoint that was left set by
+ * accident would spend money. The status screen reports the mode so the mistake is
+ * visible rather than silent.
+ */
+export function engineMode(env: Env): EngineMode {
+  if (env.ENGINE_PULL_TOKEN) return 'pull'
+  if (env.PREFERENCE_ENGINE_URL) return 'local'
+  if (env.RUNPOD_API_KEY && env.RUNPOD_ENDPOINT_ID) return 'runpod'
+  return 'none'
 }
 
-/** Where jobs are being sent, for the status screen to report. */
+export function engineConfigured(env: Env): boolean {
+  return engineMode(env) !== 'none'
+}
+
+/** True when jobs are collected rather than delivered, so nothing is submitted anywhere. */
+export function enginePulls(env: Env): boolean {
+  return engineMode(env) === 'pull'
+}
+
+/** Where jobs are going, for the status screen to report. */
 export function engineDescription(env: Env): string | null {
-  if (env.PREFERENCE_ENGINE_URL) return `local (${env.PREFERENCE_ENGINE_URL})`
-  if (env.RUNPOD_API_KEY && env.RUNPOD_ENDPOINT_ID) return `runpod (${env.RUNPOD_ENDPOINT_ID})`
-  return null
+  switch (engineMode(env)) {
+    case 'pull':
+      return 'pull (a runner collects jobs)'
+    case 'local':
+      return `local (${env.PREFERENCE_ENGINE_URL})`
+    case 'runpod':
+      return `runpod (${env.RUNPOD_ENDPOINT_ID})`
+    default:
+      return null
+  }
 }
 
 export function engineClient(env: Env, fetchImpl?: typeof fetch): RunpodClient {

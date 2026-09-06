@@ -4,7 +4,7 @@ import type { Env } from '../../env.js'
 import { createJob, findJobByHash, markSubmitted, payloadHash } from '../../db/jobs.js'
 import { activeModel, unscoredVideoIds } from '../../db/models.js'
 import { loadVideosWithChannels } from '../../db/videos.js'
-import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured } from '../runpod/engine.js'
+import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured, enginePulls } from '../runpod/engine.js'
 import { videoText } from './text.js'
 
 /**
@@ -59,7 +59,8 @@ export async function submitScoring(
     text: videoText(video, channel),
   }))
 
-  const client = engineClient(env, options.fetchImpl)
+  const pulls = enginePulls(env)
+  const client = pulls ? null : engineClient(env, options.fetchImpl)
 
   const jobIds: string[] = []
   let skipped = 0
@@ -91,9 +92,13 @@ export async function submitScoring(
       now,
     })
 
-    const payload: ScoreBatchPayload = { profile: profileId, modelVersion, items: batch }
-    const runpodJobId = await client.run('score_batch', payload)
-    await markSubmitted(env.DB, jobId, runpodJobId, now)
+    // Queued and left alone when a runner collects the work; its payload is assembled
+    // when someone comes for it.
+    if (!pulls) {
+      const payload: ScoreBatchPayload = { profile: profileId, modelVersion, items: batch }
+      const runpodJobId = await client!.run('score_batch', payload)
+      await markSubmitted(env.DB, jobId, runpodJobId, now)
+    }
     jobIds.push(jobId)
   }
 

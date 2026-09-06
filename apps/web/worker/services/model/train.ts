@@ -5,7 +5,7 @@ import { createJob, findJobByHash, markSubmitted, payloadHash } from '../../db/j
 import { createModelVersion, nextVersionNumber } from '../../db/models.js'
 import { currentRatings } from '../../db/ratings.js'
 import { loadVideosWithChannels } from '../../db/videos.js'
-import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured } from '../runpod/engine.js'
+import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured, enginePulls } from '../runpod/engine.js'
 import { videoText } from './text.js'
 
 /**
@@ -108,6 +108,12 @@ export async function submitTraining(
     context: { profileId, modelVersion, modelVersionId },
     now,
   })
+
+  // Nothing is sent anywhere when a runner collects the work instead. The job stays
+  // queued, and its payload is assembled when someone comes for it.
+  if (enginePulls(env)) {
+    return { jobId, modelVersionId, modelVersion, eventCount: events.length }
+  }
 
   const payload: TrainPayload = {
     profile: profileId,

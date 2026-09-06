@@ -116,3 +116,12 @@ export const INTEREST_WEIGHT_STEPS = {
 
 /** "30 day mute" from the preferences screen. */
 export const MUTE_DAYS = 30
+
+/**
+ * How long a claimed job stays the claimant's to finish.
+ *
+ * Longer than a training run is expected to take, so a slow machine is not treated as a
+ * dead one. Thirty minutes is a guess until there are enough ratings to measure a real
+ * run; the number is here rather than inline so that correcting it is one edit.
+ */
+export const JOB_LEASE_MINUTES = 30

@@ -117,3 +117,31 @@ export interface RunpodJobStatus<TOutput = unknown> {
   delayTime?: number
   executionTime?: number
 }
+
+// ---------------------------------------------------------------------------
+// Pull delivery (design: docs/design/pull-engine.ja.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * A job handed to a runner that came and asked for one.
+ *
+ * The payload is assembled when the job is claimed rather than stored when it is
+ * queued. A training payload carries the text of every rated video, which would make
+ * the ledger row enormous for something reconstructible from the ids already in it.
+ */
+export interface ClaimedJob {
+  id: string
+  operation: RunpodOperation
+  payload: unknown
+  /** Epoch milliseconds. Past this, the job is offered to someone else. */
+  leaseExpiresAt: number
+}
+
+export interface ClaimResponse {
+  /** Null when there is nothing queued. */
+  job: ClaimedJob | null
+}
+
+export interface JobFailureReport {
+  error: string
+}

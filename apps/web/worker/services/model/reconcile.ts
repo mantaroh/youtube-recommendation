@@ -5,10 +5,18 @@ import {
   trainResultSchema,
 } from '@ypr/domain'
 import type { Env } from '../../env.js'
-import { listRetryable, listUnfinished, markCompleted, markFailed, markSubmitted } from '../../db/jobs.js'
+import {
+  expireLeases,
+  listRetryable,
+  listUnfinished,
+  markCompleted,
+  markFailed,
+  markSubmitted,
+  requeue,
+} from '../../db/jobs.js'
 import { activateModel, saveScores, setModelStatus } from '../../db/models.js'
 import { mapRunpodStatus } from '../runpod/client.js'
-import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured } from '../runpod/engine.js'
+import { ENGINE_NOT_CONFIGURED, engineClient, engineConfigured, enginePulls } from '../runpod/engine.js'
 import { submitScoring } from './score.js'
 
 /**
@@ -49,6 +57,28 @@ export async function reconcileJobs(
 
   if (!engineConfigured(env)) {
     summary.errors.push(ENGINE_NOT_CONFIGURED)
+    return summary
+  }
+
+  /**
+   * Nothing to poll when the runner comes to us.
+   *
+   * There is no endpoint to ask about a job, so the only thing that can go unnoticed is
+   * a runner that took work and never came back. Returning its lease to the queue is the
+   * whole of reconciliation in this mode.
+   */
+  if (enginePulls(env)) {
+    summary.stillRunning = (await listUnfinished(env.DB)).length
+    const recovered = await expireLeases(env.DB, now)
+    summary.retried += recovered
+    summary.stillRunning -= recovered
+
+    // A failed job goes back in the queue rather than being resubmitted, because in this
+    // model there is nowhere to submit it to.
+    for (const job of await listRetryable(env.DB, MAX_JOB_ATTEMPTS)) {
+      await requeue(env.DB, job.id)
+      summary.retried += 1
+    }
     return summary
   }
 
@@ -114,7 +144,7 @@ export async function reconcileJobs(
   return summary
 }
 
-async function failJob(env: Env, job: GpuJob, error: string, now: EpochMillis): Promise<void> {
+export async function failJob(env: Env, job: GpuJob, error: string, now: EpochMillis): Promise<void> {
   await markFailed(env.DB, job.id, error, now)
   // A training run that failed leaves a model version stuck in `training`. Marking it
   // failed is what keeps the list of versions honest about what happened.
@@ -126,12 +156,12 @@ async function failJob(env: Env, job: GpuJob, error: string, now: EpochMillis): 
   }
 }
 
-interface AppliedResult {
+export interface AppliedResult {
   scoresWritten: number
   activatedModel: string | null
 }
 
-async function applyResult(
+export async function applyResult(
   env: Env,
   job: GpuJob,
   output: unknown,

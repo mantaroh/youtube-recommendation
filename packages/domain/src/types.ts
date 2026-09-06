@@ -196,6 +196,11 @@ export interface GpuJob {
   startedAt: EpochMillis | null
   completedAt: EpochMillis | null
   error: string | null
+  /**
+   * When a claimed job stops being the claimant's to finish.
+   * Null for jobs nobody has taken, and for the push model, which has no claim step.
+   */
+  leaseExpiresAt: EpochMillis | null
   /** How many times this job has been resubmitted (design section 48). */
   attempts: number
   /** Job-type specific context the completion handler needs, as JSON. */

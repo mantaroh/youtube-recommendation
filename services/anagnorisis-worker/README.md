@@ -207,3 +207,29 @@ be built once and pushed to any registry Runpod can read. Then:
 `ANAGNORISIS_REF` in the Dockerfile pins the upstream commit. Bump it deliberately and
 read the diff first: this is the one dependency whose behaviour, not just its API, the
 recommendations depend on.
+
+## Letting this machine collect the work
+
+`serve.py` waits to be called, which means being reachable from the internet and being
+awake whenever the Worker decides to call. The runner inverts that: nothing listens,
+nothing is exposed, and this machine decides when it is free enough.
+
+```bash
+set ENGINE_PULL_TOKEN=...
+python tools/pull_runner.py --url https://yt.mantaroh.com --volume ./volume \
+    --window 01:00-07:00
+```
+
+The window is local time, and may cross midnight (`23:00-05:00`). `--once` takes at most
+one job and stops, which is the way to try it before leaving it running.
+
+The token comes from the environment rather than an argument, so it stays out of shell
+history and out of the process list. On the Worker side, setting `ENGINE_PULL_TOKEN`
+is what puts the system in this mode: jobs are then left in the ledger instead of being
+submitted anywhere.
+
+A claimed job is held under a lease. If this machine is switched off mid-run, the job
+returns to the queue on the next reconciliation pass rather than being stranded — so
+closing the laptop costs a repeat of the work, not the loss of it.
+
+See `docs/design/pull-engine.ja.md`.
