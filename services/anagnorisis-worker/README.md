@@ -151,19 +151,28 @@ reach: it runs model training on request.
 ### Installing it on a machine
 
 ```bash
-python -m venv .venv && . .venv/Scripts/activate   # or bin/activate
+# Somewhere short. See the long-path note below — this is not a style preference.
+python -m venv C:\anaenv && C:\anaenv\Scripts\activate   # or bin/activate
 
 # torch first, from PyTorch's own index. PyPI has no wheels for some platforms that
 # this index does — Windows on ARM among them.
 pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 
-# The core without its declared dependencies; see below.
-pip install --no-deps anagnorisis-core
+# The core is not on PyPI. It comes from the upstream repository, the same way the
+# Dockerfile takes it. `torchgen` on PyPI is an unrelated project that happens to share
+# the name, so do not reach for that either when an import goes missing.
+git clone --depth 50 https://github.com/volotat/Anagnorisis.git C:\anagnorisis
+pip install --no-deps C:\anagnorisis\anagnorisis_core
 
 pip install numpy PyYAML omegaconf transformers sentence-transformers
-pip install huggingface-hub accelerate safetensors tokenizers
+pip install huggingface-hub accelerate safetensors tokenizers peft
 pip install xxhash tinytag Pillow fs soundfile setproctitle
 ```
+
+`peft` is not something the code imports, which is why it is easy to leave out. The
+embedding model ships its own modelling file and `transformers` executes it, so the
+requirement only appears when the weights are loaded — several minutes and 3.4 GB into
+the first run.
 
 `--no-deps` for the core is deliberate. Upstream declares `librosa`,
 `opencv-python-headless` and `torchaudio` for image, audio and video handling, and
@@ -179,6 +188,16 @@ Two platform notes worth keeping, because both cost an hour to rediscover:
 - **Long paths on Windows**: torch unpacks paths past the 260-character limit, so a
   virtualenv deep inside a project directory fails to install it. Put the environment
   somewhere short.
+
+  The reason this costs an hour is that **pip reports success**. An environment at
+  `services/anagnorisis-worker/.venv` — 94 characters before torch's own tree starts —
+  installed with exit code 0, left a `dist-info` holding nothing but `licenses`, and
+  then failed at `import torch` with `No module named 'torchgen'`. Nothing in that
+  chain mentions path length. The same wheel installed completely into `C:\anaenv`.
+
+  If an import from inside torch goes missing, check `dist-info` for a `RECORD` file
+  before believing anything about the wheel. Its absence means the install was
+  truncated, not that the package ships without the module.
 
 ### Checking it works
 

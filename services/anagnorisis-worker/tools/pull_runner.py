@@ -5,12 +5,12 @@ reachable from the internet and has to be awake when the Worker decides to call.
 inverts that: nothing listens, nothing is exposed, and this machine decides when it is
 free enough to do the work.
 
-    set ENGINE_PULL_TOKEN=...
     python tools/pull_runner.py --url https://yt.mantaroh.com --volume ./volume \
         --window 01:00-07:00
 
-The token comes from the environment rather than an argument, so it stays out of shell
-history and out of the process list.
+Credentials come from `engine-credentials.env` at the repository root, or from the
+environment, which overrides it. Neither is an argument, so neither reaches shell
+history or a process list.
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ from adapter.console import use_utf8_io  # noqa: E402
 from adapter.dispatch import dispatch  # noqa: E402
 
 use_utf8_io()
+
+USER_AGENT = "personal-recommender-runner/1.0"
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,10 @@ def build_headers(credentials: dict[str, str]) -> dict[str, str]:
         "Authorization": f"Bearer {credentials['ENGINE_PULL_TOKEN']}",
         "Content-Type": "application/json",
         "Accept": "application/json",
+        # Cloudflare's browser integrity check refuses urllib's default agent as a bot
+        # signature, and answers 403 with error 1010 — which reads exactly like a
+        # rejected token. Naming the client avoids an hour spent on the wrong problem.
+        "User-Agent": USER_AGENT,
     }
     client_id = credentials.get("CF_ACCESS_CLIENT_ID")
     client_secret = credentials.get("CF_ACCESS_CLIENT_SECRET")
@@ -217,11 +223,15 @@ def main() -> int:
         try:
             job = api.claim()
         except urllib.error.HTTPError as error:
-            # 403 means the token is wrong, and waiting will not fix it.
+            # 403 comes from two very different places and waiting fixes neither, so the
+            # body is printed rather than guessed at: the Worker answers `forbidden` for
+            # a bad bearer token, while Cloudflare answers error 1010 when it dislikes
+            # the client — which has nothing to do with the token at all.
+            detail = error.read().decode("utf-8", "replace")[:300]
             if error.code == 403:
-                print("rejected: check ENGINE_PULL_TOKEN", file=sys.stderr)
+                print(f"refused (403): {detail}", file=sys.stderr)
                 return 1
-            print(f"claim failed: {error}", file=sys.stderr)
+            print(f"claim failed ({error.code}): {detail}", file=sys.stderr)
             job = None
         except urllib.error.URLError as error:
             print(f"cannot reach the worker: {error.reason}", file=sys.stderr)
