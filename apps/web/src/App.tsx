@@ -54,7 +54,7 @@ export function App() {
   }, [])
 
   return (
-    <div className="app">
+    <div className={route.name === 'video' ? 'app is-watching' : 'app'}>
       <header className="topbar">
         <button type="button" className="brand" onClick={() => navigate('/')}>
           Personal Recommender

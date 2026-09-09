@@ -49,6 +49,19 @@ body {
 
 .app { max-width: 1180px; margin: 0 auto; padding: 0 1rem 4rem; }
 
+/*
+ * Watching gets the window; reading does not.
+ *
+ * 1180px is a comfortable measure for the feed and the settings screens, and a hard
+ * ceiling on a player that wants every pixel it can have. The shell keeps its width for
+ * everything else and steps aside for this one page.
+ *
+ * The class comes from the router rather than from `:has(.page-video)`. A selector the
+ * browser does not support fails silently and leaves the page exactly as wide as it was,
+ * which is indistinguishable from the rule not being written at all.
+ */
+.app.is-watching { max-width: none; }
+
 /* -- Chrome ------------------------------------------------------------- */
 
 .topbar {
@@ -228,7 +241,7 @@ body {
  * to a thumbnail; below 1100px there is no room for both, and the column goes under the
  * player rather than squeezing it.
  */
-.page-video { max-width: 1500px; }
+.page-video { max-width: 1800px; margin: 0 auto; }
 
 .video-layout {
   display: grid;
