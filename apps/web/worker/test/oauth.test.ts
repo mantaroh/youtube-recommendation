@@ -12,6 +12,8 @@ import {
   seal,
   YOUTUBE_SCOPE,
 } from '../services/youtube/oauth.js'
+import { oauthConfig } from '../services/youtube/credentials.js'
+import type { Env } from '../env.js'
 import { createTestDatabase } from './d1.js'
 import { stubFetch } from './fixtures.js'
 
@@ -190,5 +192,49 @@ describe('the state parameter', () => {
 
     const row = await db.prepare('SELECT COUNT(*) AS count FROM oauth_states').first<{ count: number }>()
     expect(row?.count).toBe(0)
+  })
+})
+
+describe('which redirect URI the flow uses', () => {
+  /**
+   * One client secret, several hostnames (`docs/design/multi-profile.ja.md`).
+   *
+   * The authorisation URL and the code exchange have to name the same redirect URI or
+   * Google refuses the exchange, and each account's flow has to come back to the host it
+   * started on so the browser lands on the right profile. Deriving it from the request
+   * satisfies both; a single stored value satisfies neither once there are two hosts.
+   */
+  const env = {
+    GOOGLE_CLIENT_ID: 'client-id',
+    GOOGLE_CLIENT_SECRET: 'client-secret',
+    OAUTH_ENCRYPTION_KEY: KEY,
+    OAUTH_REDIRECT_URI: 'https://yt.example.com/api/auth/youtube/callback',
+  } as Env
+
+  it('returns to the host the request arrived on', () => {
+    expect(oauthConfig(env, 'https://yt-private.example.com')?.redirectUri).toBe(
+      'https://yt-private.example.com/api/auth/youtube/callback',
+    )
+    expect(oauthConfig(env, 'https://yt.example.com')?.redirectUri).toBe(
+      'https://yt.example.com/api/auth/youtube/callback',
+    )
+  })
+
+  it('falls back to the stored value when there is no request', () => {
+    // The cron refreshing a token has no origin to work from. It never sends a redirect
+    // URI either, so the value only has to exist, not to be right for any given host.
+    expect(oauthConfig(env)?.redirectUri).toBe('https://yt.example.com/api/auth/youtube/callback')
+  })
+
+  it('is configured by an origin even with no stored value', () => {
+    const { OAUTH_REDIRECT_URI: _unused, ...withoutStored } = env
+    expect(oauthConfig(withoutStored as Env, 'https://yt.example.com')).not.toBeNull()
+    // Nothing to fall back to, and nothing to derive from.
+    expect(oauthConfig(withoutStored as Env)).toBeNull()
+  })
+
+  it('is not configured without a client secret, whatever the host', () => {
+    const { GOOGLE_CLIENT_SECRET: _unused, ...halfConfigured } = env
+    expect(oauthConfig(halfConfigured as Env, 'https://yt.example.com')).toBeNull()
   })
 })
