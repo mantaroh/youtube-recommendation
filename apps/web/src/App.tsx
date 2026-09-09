@@ -82,7 +82,13 @@ export function App() {
 
       <main>
         {route.name === 'home' && <HomePage onOpen={(id) => navigate(videoPath(id))} />}
-        {route.name === 'video' && <VideoPage videoId={route.videoId} onBack={() => navigate('/')} />}
+        {route.name === 'video' && (
+          <VideoPage
+            videoId={route.videoId}
+            onBack={() => navigate('/')}
+            onOpen={(id) => navigate(videoPath(id))}
+          />
+        )}
         {route.name === 'preferences' && <PreferencesPage />}
         {route.name === 'settings' && <SettingsPage />}
       </main>
