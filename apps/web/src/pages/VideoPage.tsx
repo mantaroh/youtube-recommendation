@@ -19,10 +19,13 @@ import { formatDate, formatViews, videoPath } from '../domain/reasons.js'
  * records the play. It is their own account and their own video, and the alternative is
  * a player that refuses part of their subscriptions.
  *
- * Whether a members-only video will actually play here is not established. YouTube may
- * refuse to embed it whatever the domain. That is why the link out is not a fallback
- * shown on failure but a permanent part of the page: a page that cannot play something
- * should still be able to take you where it plays.
+ * Members-only videos do play here, checked against a real one after the change. They
+ * did not on the nocookie domain, which is what prompted it.
+ *
+ * The link out stays regardless. Something will eventually refuse to embed — an
+ * uploader who disallows it, a region block — and an iframe that refuses tells the page
+ * around it nothing at all, so there is no failure to show a fallback on. A page that
+ * cannot play something should still be able to take you where it plays.
  */
 export interface VideoPageProps {
   videoId: string
