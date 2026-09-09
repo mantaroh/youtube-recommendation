@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { Video } from '@ypr/domain'
 import type { Env } from '../env.js'
 import { appendRating } from '../db/ratings.js'
 import {
@@ -113,6 +114,25 @@ describe('the training set', () => {
   })
 })
 
+function sampleVideo(overrides: Partial<Video> = {}): Video {
+  return {
+    id: 'youtube:a',
+    source: 'youtube',
+    externalId: 'a',
+    channelId: null,
+    title: 'Title',
+    description: '',
+    thumbnailUrl: null,
+    publishedAt: NOW,
+    durationSeconds: 600,
+    viewCount: 1,
+    metadata: {},
+    discoveredAt: NOW,
+    refreshedAt: null,
+    ...overrides,
+  }
+}
+
 describe('videoText', () => {
   it('truncates a very long description rather than sending it whole', () => {
     const text = videoText(
@@ -137,6 +157,38 @@ describe('videoText', () => {
     // that is the expensive path; truncating first keeps a two-thousand-item batch
     // from becoming two thousand generation runs.
     expect(text.length).toBeLessThan(1_500)
+  })
+
+  /**
+   * Length was the one thing the ranking could see and the model could not. Ratings on
+   * this installation split at three minutes — a mean of 1.2 below, 3.3 above — and none
+   * of it could be learned, because the text carried no clue that a video was short.
+   */
+  it('tells the model how long the video is', () => {
+    const text = videoText(sampleVideo({ durationSeconds: 45 }), null)
+    expect(text).toContain('Length: 45 seconds (a short)')
+  })
+
+  it('names the band rather than only the number', () => {
+    // The embedder reads text: "a short" means something in its vocabulary that 45
+    // does not, and the band is what the preference is actually about.
+    expect(videoText(sampleVideo({ durationSeconds: 150 }), null)).toContain('(a short)')
+    expect(videoText(sampleVideo({ durationSeconds: 1_200 }), null)).toContain('(long)')
+    expect(videoText(sampleVideo({ durationSeconds: 7_200 }), null)).toContain('(very long)')
+    expect(videoText(sampleVideo({ durationSeconds: 400 }), null)).not.toContain('(')
+  })
+
+  it('says nothing when the length is unknown', () => {
+    // Better silent than asserting a length that was never fetched.
+    expect(videoText(sampleVideo({ durationSeconds: null }), null)).not.toContain('Length:')
+  })
+
+  it('puts the length before the description, which is the part that gets cut', () => {
+    const text = videoText(
+      sampleVideo({ durationSeconds: 30, description: 'x'.repeat(5_000) }),
+      null,
+    )
+    expect(text.indexOf('Length:')).toBeLessThan(text.indexOf('xxxx'))
   })
 })
 

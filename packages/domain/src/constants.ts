@@ -18,6 +18,20 @@ export const DEFAULT_WEIGHTS: RankingWeights = {
   explorationBonus: 0.6,
   seenPenalty: 2.0,
   mutedInterestPenalty: 6.0,
+  /**
+   * Shorts, charged the same as being shown twice already.
+   *
+   * Not a guess. On this installation the ratings split at three minutes — a mean of
+   * 1.2 below it over twenty-eight ratings against 3.3 above over twenty-eight — while
+   * 81% of the catalog sits below it. Without something at the ranking layer, four
+   * videos in five are ones the reader has spent a month saying no to.
+   *
+   * 2.0 is worth roughly three rating points of prediction at the scale the other
+   * weights use, so a short video has to be predicted well to outrank a long one that
+   * is merely average. It does not remove them: a short video the model is confident
+   * about still appears, which is the point of a weight rather than a filter.
+   */
+  shortPenalty: 2.0,
 }
 
 /** Initial lane mix (design section 17): 50 / 30 / 20. */
@@ -41,6 +55,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   /** No more than 3 videos from one channel per 20 shown (design section 35). */
   maxPerChannel: 3,
   freshnessHalfLifeDays: 7,
+  /** YouTube's own line for a Short, and where this installation's ratings divide. */
+  shortThresholdSeconds: 180,
   retrainAfterRatings: 20,
   retrainAfterDays: 7,
 }

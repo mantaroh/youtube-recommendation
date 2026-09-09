@@ -28,11 +28,34 @@ export function videoText(video: Video, channel: Channel | null): string {
   const lines = [video.title]
   if (channelName) lines.push(`Channel: ${channelName}`)
   if (tags.length > 0) lines.push(`Tags: ${tags.join(', ')}`)
+  // Length, which was missing and turned out to matter more than anything else here:
+  // ratings below three minutes averaged 1.2 against 3.3 above. Without this the model
+  // sees a short video and a long one as the same kind of thing and cannot learn the
+  // difference however often it is told.
+  //
+  // Before the description, because the description is truncated and this must not be
+  // the part that falls off the end.
+  if (video.durationSeconds !== null) lines.push(`Length: ${describeLength(video.durationSeconds)}`)
 
   const description = (video.description ?? '').trim()
   if (description) lines.push('', truncate(description, DESCRIPTION_LIMIT))
 
   return lines.join('\n').trim()
+}
+
+/**
+ * Length as a phrase rather than a number.
+ *
+ * The embedder reads text, and "45 seconds (a short)" carries more for it than "45":
+ * the word has a meaning in the model's vocabulary that the integer does not, and the
+ * band matters more here than the exact figure.
+ */
+function describeLength(seconds: number): string {
+  if (seconds <= 60) return `${seconds} seconds (a short)`
+  if (seconds <= 180) return `${Math.round(seconds / 60)} minutes (a short)`
+  if (seconds <= 600) return `${Math.round(seconds / 60)} minutes`
+  if (seconds <= 3600) return `${Math.round(seconds / 60)} minutes (long)`
+  return `${(seconds / 3600).toFixed(1)} hours (very long)`
 }
 
 function truncate(value: string, limit: number): string {

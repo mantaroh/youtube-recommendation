@@ -237,6 +237,8 @@ export interface ScoreBreakdown {
   seenPenalty: number
   /** Subtracted. */
   mutedInterestPenalty: number
+  /** Subtracted. Zero for a video with no known duration, which is not evidence. */
+  shortPenalty: number
   total: number
 }
 
@@ -292,6 +294,13 @@ export interface RankingWeights {
   explorationBonus: number
   seenPenalty: number
   mutedInterestPenalty: number
+  /**
+   * Charged against videos shorter than `shortThresholdSeconds`.
+   *
+   * A preference, not a rule, which is why it is a weight and not a filter. Negative
+   * turns it into a bonus for someone who wants more of them, and zero switches it off.
+   */
+  shortPenalty: number
 }
 
 /** Lane mix (design sections 17 and 34). */
@@ -324,6 +333,16 @@ export interface AppSettings {
   maxPerChannel: number
   /** Freshness half-life in days. */
   freshnessHalfLifeDays: number
+  /**
+   * At or below this length a video counts as short, and `weights.shortPenalty` applies.
+   * Inclusive, because YouTube's own line is "up to three minutes": a video of exactly
+   * 3:00 is a Short.
+   *
+   * Three minutes because that is where YouTube draws the line for Shorts, and because
+   * it is where the ratings on this installation divide: a mean of 1.2 below it against
+   * 3.3 above, over fifty-six ratings.
+   */
+  shortThresholdSeconds: number
   /** Ratings since the last training run that trigger a retrain (design section 31). */
   retrainAfterRatings: number
   /** Days since the last training run that trigger a retrain. */
