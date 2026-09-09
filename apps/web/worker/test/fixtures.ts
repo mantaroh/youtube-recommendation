@@ -39,7 +39,6 @@ export async function seedVideo(db: D1Database, options: SeedVideoOptions): Prom
         thumbnailUrl: null,
       },
     ],
-    { now },
   )
 
   // Following is a profile's relation to the channel, not a property of it

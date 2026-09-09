@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { ensureProfile } from '../db/settings.js'
-import { listChannels, listChannelsToRefresh, setSubscribed } from '../db/videos.js'
+import {
+  listChannels,
+  listChannelsToRefresh,
+  markChannelsFetched,
+  setSubscribed,
+  upsertChannels,
+} from '../db/videos.js'
 import { buildFeed } from '../services/recommendation/feed.js'
 import { createTestDatabase } from './d1.js'
 import { seedVideo } from './fixtures.js'
@@ -124,5 +130,57 @@ describe('the feed of a profile with nothing of its own', () => {
     for (const item of theirs.items) {
       expect(item.breakdown.subscriptionBonus).toBe(0)
     }
+  })
+})
+
+describe('a newly subscribed channel', () => {
+  /**
+   * The second account synced two hundred channels and not one of their videos was ever
+   * fetched. `upsertChannels` stamped `last_fetched_at` with the moment the channel was
+   * first *seen*, the refresh walks least-recently-fetched first, and so the new
+   * channels sorted behind every channel the first account already had. Nothing failed;
+   * the queue simply never reached them.
+   */
+  it('is recorded as never fetched, not as just fetched', async () => {
+    const db = await twoProfiles()
+    await upsertChannels(db, 'youtube', [
+      { externalId: 'UCfresh', title: 'Fresh', thumbnailUrl: null },
+    ])
+
+    const [channel] = await listChannels(db, 'default')
+    expect(channel.lastFetchedAt).toBeNull()
+  })
+
+  it('is walked before channels whose uploads have already been read', async () => {
+    const db = await twoProfiles()
+    // An established channel, walked long ago but walked.
+    await seedVideo(db, { id: 'youtube:old', channelExternalId: 'UCold', subscribed: true })
+    await markChannelsFetched(db, ['youtube:UCold'], NOW - 86_400_000)
+
+    await upsertChannels(db, 'youtube', [
+      { externalId: 'UCnew', title: 'New', thumbnailUrl: null },
+    ])
+    await setSubscribed(db, 'private', ['youtube:UCnew'], NOW)
+
+    // Least-recently-fetched first, and "never" is less recent than any timestamp.
+    expect((await listChannelsToRefresh(db, 10)).map((c) => c.id)).toEqual([
+      'youtube:UCnew',
+      'youtube:UCold',
+    ])
+  })
+
+  it('does not lose the timestamp of a channel that is already known', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:a', channelExternalId: 'UCknown', subscribed: true })
+    await markChannelsFetched(db, ['youtube:UCknown'], NOW)
+
+    // Seeing it again in a search result must not reset it to "never fetched", which
+    // would have the walk return to it immediately and spend quota re-reading it.
+    await upsertChannels(db, 'youtube', [
+      { externalId: 'UCknown', title: 'Known', thumbnailUrl: null },
+    ])
+
+    const [channel] = await listChannels(db, 'default', { subscribedOnly: true })
+    expect(channel.lastFetchedAt).toBe(NOW)
   })
 })

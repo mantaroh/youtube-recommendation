@@ -27,7 +27,6 @@ export async function upsertChannels(
   db: D1Database,
   source: Source,
   channels: SourceChannel[],
-  options: { now: EpochMillis },
 ): Promise<number> {
   if (channels.length === 0) return 0
 
@@ -35,13 +34,19 @@ export async function upsertChannels(
     const id = itemKey({ source, externalId: channel.externalId })
     return db
       .prepare(
+        // `last_fetched_at` is left null: it means "this channel's uploads have been
+        // read", and knowing the channel exists is not that. Writing `now` here made a
+        // newly subscribed channel indistinguishable from one just walked, and the
+        // refresh goes least-recently-fetched first — so two hundred channels added by
+        // a second account sorted behind every channel of the first and their uploads
+        // were never fetched at all.
         `INSERT INTO channels (id, source, external_id, title, thumbnail_url, last_fetched_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL)
          ON CONFLICT(id) DO UPDATE SET
            title = COALESCE(excluded.title, channels.title),
            thumbnail_url = COALESCE(excluded.thumbnail_url, channels.thumbnail_url)`,
       )
-      .bind(id, source, channel.externalId, channel.title, channel.thumbnailUrl, options.now)
+      .bind(id, source, channel.externalId, channel.title, channel.thumbnailUrl)
   })
 
   await db.batch(statements)

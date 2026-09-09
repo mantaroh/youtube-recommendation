@@ -315,7 +315,7 @@ async function store(
 ): Promise<number> {
   if (items.length === 0) return 0
   const now = Date.now()
-  await upsertChannels(env.DB, 'youtube', channelsFromItems(items), { now })
+  await upsertChannels(env.DB, 'youtube', channelsFromItems(items))
   return upsertVideos(env.DB, 'youtube', items, {
     now,
     discoveredBy: lane,
@@ -349,7 +349,7 @@ export async function syncSubscriptions(
     const channels = await client.listSubscriptions()
     // The channel row and the subscription are written separately now: the first is a
     // catalog fact shared by every profile, the second belongs to this account alone.
-    await upsertChannels(env.DB, 'youtube', channels, { now })
+    await upsertChannels(env.DB, 'youtube', channels)
     await setSubscribed(
       env.DB,
       profileId,
