@@ -22,6 +22,14 @@
     {
       "pattern": "yt.mantaroh.com",
       "custom_domain": true
+    },
+    // A second YouTube account, learned separately (docs/design/multi-profile.ja.md).
+    // Add the hostname to the *existing* Access application rather than creating a new
+    // one: `ACCESS_AUD` holds one audience tag, and a separate application issues a
+    // different one, which this would then refuse for good.
+    {
+      "pattern": "yt-private.mantaroh.com",
+      "custom_domain": true
     }
   ],
 
@@ -87,7 +95,7 @@
     // Console as an authorised redirect URI, and the hostname added to the Cloudflare
     // Access application. Without the second, authorisation stops at
     // `redirect_uri_mismatch`; without the third, the host is open.
-    "PROFILE_HOSTS": "{\"yt.mantaroh.com\":\"default\"}"
+    "PROFILE_HOSTS": "{\"yt.mantaroh.com\":\"default\",\"yt-private.mantaroh.com\":\"private\"}"
   }
 
   // Secrets, set with `wrangler secret put` (design section 43):
