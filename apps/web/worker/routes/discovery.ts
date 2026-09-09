@@ -38,7 +38,7 @@ discoveryRoutes.post('/discovery/subscriptions', async (context) => {
 
 discoveryRoutes.get('/channels', async (context) => {
   const app = context.get('app')
-  return context.json({ channels: await listChannels(app.env.DB) })
+  return context.json({ channels: await listChannels(app.env.DB, app.profileId) })
 })
 
 /** What is left of today's search allowance (design section 42). */

@@ -212,7 +212,7 @@ describe('syncing subscriptions', () => {
     const result = await syncSubscriptions(env, 'default', NOW, { fetchImpl })
 
     expect(result.channels).toBe(1)
-    const channels = await listChannels(db, { subscribedOnly: true })
+    const channels = await listChannels(db, 'default', { subscribedOnly: true })
     // A merge could never express a removal, so the list is replaced wholesale.
     expect(channels.map((channel) => channel.externalId)).toEqual(['UCkept'])
   })

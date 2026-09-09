@@ -180,6 +180,7 @@ describe('the regional popularity chart', () => {
 
     const summary = await discoverPopular(
       envWith(db),
+      'default',
       { ...DEFAULT_SETTINGS, region: 'JP' },
       NOW,
       { fetchImpl },
@@ -194,7 +195,7 @@ describe('the regional popularity chart', () => {
     const db = createTestDatabase()
     const fetchImpl = stubFetch([['/videos', { items: [] }]])
 
-    const summary = await discoverPopular(envWith(db), DEFAULT_SETTINGS, NOW, { fetchImpl })
+    const summary = await discoverPopular(envWith(db), 'default', DEFAULT_SETTINGS, NOW, { fetchImpl })
 
     expect(summary.searchCalls).toBe(0)
     expect(summary.listCalls).toBeGreaterThan(0)
@@ -243,7 +244,7 @@ describe('the regional popularity chart', () => {
       ['/videos', { items: [] }],
     ])
 
-    const summary = await discoverPopular(env, { ...DEFAULT_SETTINGS, region: 'JP' }, NOW, {
+    const summary = await discoverPopular(env, 'default', { ...DEFAULT_SETTINGS, region: 'JP' }, NOW, {
       fetchImpl,
     })
 
@@ -258,7 +259,7 @@ describe('the regional popularity chart', () => {
     const env = { ...envWith(db), CRAWL_REGIONS: 'JP,US', CRAWL_CATEGORIES: '28' } as Env
     const fetchImpl = stubFetch([['/videos', { items: [] }]])
 
-    const summary = await discoverPopular(env, { ...DEFAULT_SETTINGS, region: 'JP' }, NOW, {
+    const summary = await discoverPopular(env, 'default', { ...DEFAULT_SETTINGS, region: 'JP' }, NOW, {
       fetchImpl,
     })
 

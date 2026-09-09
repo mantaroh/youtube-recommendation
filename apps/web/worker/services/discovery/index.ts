@@ -64,7 +64,7 @@ export async function runDiscovery(
   const budget = await SearchBudget.open(env.DB, budgetCeiling, now)
 
   if (lanes.includes('subscription')) {
-    summaries.push(await discoverSubscriptions(env, now, options))
+    summaries.push(await discoverSubscriptions(env, profileId, now, options))
   }
 
   const settings = await loadSettings(env.DB, profileId)
@@ -74,7 +74,7 @@ export async function runDiscovery(
 
     if (lanes.includes('related')) {
       const terms = seeds.slice(0, DISCOVERY_QUERIES_PER_INTEREST * 2)
-      summaries.push(await discoverBySearch(env, 'related', terms, budget, now, settings, options))
+      summaries.push(await discoverBySearch(env, profileId, 'related', terms, budget, now, settings, options))
     }
 
     if (lanes.includes('explore')) {
@@ -84,13 +84,13 @@ export async function runDiscovery(
       // seeds alone.
       const preferred = settings.language === 'ja' ? 'ja' : 'latin'
       const terms = adjacentTopics(seeds, DISCOVERY_QUERIES_PER_INTEREST, preferred)
-      summaries.push(await discoverBySearch(env, 'explore', terms, budget, now, settings, options))
+      summaries.push(await discoverBySearch(env, profileId, 'explore', terms, budget, now, settings, options))
 
       // The popularity chart costs one unit per region and category and no search call
       // at all, so it runs alongside the searches rather than instead of them. It is
       // also the only pass that works before anything has been rated: without it a new
       // installation discovers nothing until the first ratings exist.
-      summaries.push(await discoverPopular(env, settings, now, options))
+      summaries.push(await discoverPopular(env, profileId, settings, now, options))
     }
   }
 
@@ -108,6 +108,7 @@ export async function runDiscovery(
  */
 export async function discoverSubscriptions(
   env: Env,
+  profileId: string,
   now: EpochMillis,
   options: { fetchImpl?: typeof fetch } = {},
 ): Promise<DiscoverySummary> {
@@ -121,7 +122,7 @@ export async function discoverSubscriptions(
     errors: [],
   }
 
-  const credentials = await youtubeCredentials(env, now, options.fetchImpl)
+  const credentials = await youtubeCredentials(env, now, options.fetchImpl, profileId)
   if (!credentials.apiKey && !credentials.accessToken) {
     summary.errors.push('no YouTube credentials configured')
     return summary
@@ -173,6 +174,7 @@ export async function discoverSubscriptions(
  */
 export async function discoverPopular(
   env: Env,
+  profileId: string,
   settings: AppSettings,
   now: EpochMillis,
   options: { fetchImpl?: typeof fetch } = {},
@@ -187,7 +189,7 @@ export async function discoverPopular(
     errors: [],
   }
 
-  const credentials = await youtubeCredentials(env, now, options.fetchImpl)
+  const credentials = await youtubeCredentials(env, now, options.fetchImpl, profileId)
   if (!credentials.apiKey && !credentials.accessToken) {
     summary.errors.push('no YouTube credentials configured')
     return summary
@@ -227,6 +229,7 @@ export async function discoverPopular(
 
 async function discoverBySearch(
   env: Env,
+  profileId: string,
   lane: Lane,
   terms: string[],
   budget: SearchBudget,
@@ -249,7 +252,7 @@ async function discoverBySearch(
     return summary
   }
 
-  const credentials = await youtubeCredentials(env, now, options.fetchImpl)
+  const credentials = await youtubeCredentials(env, now, options.fetchImpl, profileId)
   if (!credentials.apiKey && !credentials.accessToken) {
     summary.errors.push('no YouTube credentials configured')
     return summary
@@ -332,7 +335,7 @@ export async function syncSubscriptions(
   now: EpochMillis,
   options: { fetchImpl?: typeof fetch } = {},
 ): Promise<{ channels: number; errors: string[] }> {
-  const credentials = await youtubeCredentials(env, now, options.fetchImpl)
+  const credentials = await youtubeCredentials(env, now, options.fetchImpl, profileId)
   if (!credentials.accessToken) {
     return { channels: 0, errors: ['no YouTube account connected'] }
   }
@@ -344,9 +347,12 @@ export async function syncSubscriptions(
 
   try {
     const channels = await client.listSubscriptions()
-    await upsertChannels(env.DB, 'youtube', channels, { subscribed: true, now })
+    // The channel row and the subscription are written separately now: the first is a
+    // catalog fact shared by every profile, the second belongs to this account alone.
+    await upsertChannels(env.DB, 'youtube', channels, { now })
     await setSubscribed(
       env.DB,
+      profileId,
       channels.map((channel) => `youtube:${channel.externalId}`),
       now,
     )

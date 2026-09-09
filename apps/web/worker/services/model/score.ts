@@ -53,7 +53,7 @@ export async function submitScoring(
     return { jobIds: [], modelVersion, itemCount: 0, skipped: 0 }
   }
 
-  const loaded = await loadVideosWithChannels(env.DB, ids)
+  const loaded = await loadVideosWithChannels(env.DB, profileId, ids)
   const items: ScoreBatchItem[] = loaded.map(({ video, channel }) => ({
     id: video.id,
     text: videoText(video, channel),

@@ -21,7 +21,7 @@ dataRoutes.get('/status', async (context) => {
   const app = context.get('app')
   const [videos, channels, ratings, model, searchUsed] = await Promise.all([
     countVideos(app.env.DB),
-    listChannels(app.env.DB, { subscribedOnly: true }),
+    listChannels(app.env.DB, app.profileId, { subscribedOnly: true }),
     listAllRatings(app.env.DB, app.profileId),
     activeModel(app.env.DB, app.profileId),
     usedToday(app.env.DB, 'search', app.now),

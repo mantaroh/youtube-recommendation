@@ -51,7 +51,7 @@ export async function buildJobPayload(db: D1Database, job: GpuJob): Promise<unkn
     if (!modelVersion) throw new PayloadUnavailable(`job ${job.id} has no model version`)
     if (videoIds.length === 0) throw new PayloadUnavailable(`job ${job.id} lists no videos`)
 
-    const loaded = await loadVideosWithChannels(db, videoIds)
+    const loaded = await loadVideosWithChannels(db, profileId, videoIds)
     if (loaded.length === 0) {
       // Every video in the batch has since been deleted. There is nothing to score, and
       // handing back an empty batch would have the runner do a round trip for nothing.

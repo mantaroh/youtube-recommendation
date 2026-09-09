@@ -15,41 +15,33 @@ export interface IngestResult {
   videos: number
 }
 
+/**
+ * The channel as a catalog fact: who it is, not who follows it.
+ *
+ * Following is a property of one YouTube account and lives in `profile_subscriptions`
+ * (migration 0008). Keeping it out of here is what stops a search result — which says
+ * nothing about whether anyone follows the channel it mentions — from being able to
+ * change a subscription.
+ */
 export async function upsertChannels(
   db: D1Database,
   source: Source,
   channels: SourceChannel[],
-  options: { subscribed?: boolean; now: EpochMillis },
+  options: { now: EpochMillis },
 ): Promise<number> {
   if (channels.length === 0) return 0
 
   const statements = channels.map((channel) => {
     const id = itemKey({ source, externalId: channel.externalId })
-    // `subscribed` is only written when the caller is in a position to know. A search
-    // result mentioning a channel says nothing about whether the user follows it, and
-    // overwriting the flag there would silently unsubscribe them.
-    if (options.subscribed === undefined) {
-      return db
-        .prepare(
-          `INSERT INTO channels (id, source, external_id, title, thumbnail_url, subscribed, last_fetched_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)
-           ON CONFLICT(id) DO UPDATE SET
-             title = COALESCE(excluded.title, channels.title),
-             thumbnail_url = COALESCE(excluded.thumbnail_url, channels.thumbnail_url)`,
-        )
-        .bind(id, source, channel.externalId, channel.title, channel.thumbnailUrl, options.now)
-    }
     return db
       .prepare(
-        `INSERT INTO channels (id, source, external_id, title, thumbnail_url, subscribed, last_fetched_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        `INSERT INTO channels (id, source, external_id, title, thumbnail_url, last_fetched_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(id) DO UPDATE SET
            title = COALESCE(excluded.title, channels.title),
-           thumbnail_url = COALESCE(excluded.thumbnail_url, channels.thumbnail_url),
-           subscribed = excluded.subscribed,
-           last_fetched_at = excluded.last_fetched_at`,
+           thumbnail_url = COALESCE(excluded.thumbnail_url, channels.thumbnail_url)`,
       )
-      .bind(id, source, channel.externalId, channel.title, channel.thumbnailUrl, options.subscribed ? 1 : 0, options.now)
+      .bind(id, source, channel.externalId, channel.title, channel.thumbnailUrl, options.now)
   })
 
   await db.batch(statements)
@@ -194,6 +186,11 @@ export interface ChannelRow {
   external_id: string
   title: string | null
   thumbnail_url: string | null
+  /**
+   * Not a column any more (migration 0008). Every query that reports it joins
+   * `profile_subscriptions` for one profile, so it always means "does *this* profile
+   * follow it" rather than "does anyone".
+   */
   subscribed: number
   last_fetched_at: number | null
 }
@@ -215,11 +212,28 @@ export async function getVideo(db: D1Database, id: string): Promise<Video | null
   return row ? toVideo(row) : null
 }
 
-export async function listChannels(db: D1Database, options: { subscribedOnly?: boolean } = {}): Promise<Channel[]> {
+/**
+ * Channels, with `subscribed` meaning "this profile follows it".
+ *
+ * `profileId` is required rather than optional. It was optional-by-omission before —
+ * the flag was global — and that is exactly how one account's subscription list came to
+ * be shown on another's feed.
+ */
+export async function listChannels(
+  db: D1Database,
+  profileId: string,
+  options: { subscribedOnly?: boolean } = {},
+): Promise<Channel[]> {
   const sql = options.subscribedOnly
-    ? 'SELECT * FROM channels WHERE subscribed = 1 ORDER BY title'
-    : 'SELECT * FROM channels ORDER BY subscribed DESC, title'
-  const { results } = await db.prepare(sql).all<ChannelRow>()
+    ? `SELECT c.*, 1 AS subscribed
+         FROM channels c
+         JOIN profile_subscriptions s ON s.channel_id = c.id AND s.profile_id = ?1
+        ORDER BY c.title`
+    : `SELECT c.*, CASE WHEN s.channel_id IS NULL THEN 0 ELSE 1 END AS subscribed
+         FROM channels c
+         LEFT JOIN profile_subscriptions s ON s.channel_id = c.id AND s.profile_id = ?1
+        ORDER BY subscribed DESC, c.title`
+  const { results } = await db.prepare(sql).bind(profileId).all<ChannelRow>()
   return (results ?? []).map(toChannel)
 }
 
@@ -231,12 +245,16 @@ export async function listChannels(db: D1Database, options: { subscribedOnly?: b
  * lag is spread evenly instead of concentrating on whichever channels sort last.
  */
 export async function listChannelsToRefresh(db: D1Database, limit: number): Promise<Channel[]> {
+  // Anyone's subscription, not one profile's. The videos this fetches go into the
+  // shared catalog, so walking a channel once serves every profile that follows it —
+  // and walking it per profile would spend the same quota several times over.
   const { results } = await db
     .prepare(
-      `SELECT * FROM channels
-       WHERE subscribed = 1
-       ORDER BY COALESCE(last_fetched_at, 0) ASC
-       LIMIT ?1`,
+      `SELECT c.*, 1 AS subscribed
+         FROM channels c
+        WHERE EXISTS (SELECT 1 FROM profile_subscriptions s WHERE s.channel_id = c.id)
+        ORDER BY COALESCE(c.last_fetched_at, 0) ASC
+        LIMIT ?1`,
     )
     .bind(Math.max(1, limit))
     .all<ChannelRow>()
@@ -258,18 +276,48 @@ export async function markChannelsFetched(
 
 export async function setSubscribed(
   db: D1Database,
+  profileId: string,
   channelIds: string[],
   now: EpochMillis,
 ): Promise<void> {
-  // Subscriptions are replaced wholesale rather than merged: unsubscribing on YouTube
-  // has to be able to reach this system, and a merge could never express a removal.
-  const statements = [db.prepare('UPDATE channels SET subscribed = 0 WHERE subscribed = 1')]
-  for (const id of channelIds) {
-    statements.push(
-      db.prepare('UPDATE channels SET subscribed = 1, last_fetched_at = COALESCE(last_fetched_at, ?2) WHERE id = ?1').bind(id, now),
-    )
-  }
-  await db.batch(statements)
+  // Replaced wholesale rather than merged: unsubscribing on YouTube has to be able to
+  // reach this system, and a merge could never express a removal.
+  //
+  // Scoped to the profile, which is the whole point. The delete used to clear every row
+  // in the table, so syncing a second account would have emptied the first one's list
+  // on its way to writing its own.
+  await db.batch([
+    db.prepare('DELETE FROM profile_subscriptions WHERE profile_id = ?1').bind(profileId),
+    ...subscribeStatements(db, profileId, channelIds, now),
+  ])
+}
+
+/** Adds to a profile's subscriptions without disturbing what is already there. */
+export async function addSubscriptions(
+  db: D1Database,
+  profileId: string,
+  channelIds: string[],
+  now: EpochMillis,
+): Promise<void> {
+  if (channelIds.length === 0) return
+  await db.batch(subscribeStatements(db, profileId, channelIds, now))
+}
+
+function subscribeStatements(
+  db: D1Database,
+  profileId: string,
+  channelIds: string[],
+  now: EpochMillis,
+): D1PreparedStatement[] {
+  return channelIds.map((id) =>
+    db
+      .prepare(
+        `INSERT INTO profile_subscriptions (profile_id, channel_id, subscribed_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(profile_id, channel_id) DO NOTHING`,
+      )
+      .bind(profileId, id, now),
+  )
 }
 
 export async function countVideos(db: D1Database): Promise<number> {
@@ -296,13 +344,22 @@ interface JoinedRow extends VideoRow {
   c_last_fetched_at: number | null
 }
 
+/**
+ * The profile is `?1`, bound first by every caller of this fragment.
+ *
+ * The subscription bonus in the ranking reads `channel.subscribed`, so binding the
+ * wrong profile here does not fail — it quietly ranks one account's feed by another
+ * account's subscriptions.
+ */
 const JOIN_SELECT = `
   SELECT v.*,
          c.id AS c_id, c.source AS c_source, c.external_id AS c_external_id,
          c.title AS c_title, c.thumbnail_url AS c_thumbnail_url,
-         c.subscribed AS c_subscribed, c.last_fetched_at AS c_last_fetched_at
+         CASE WHEN s.channel_id IS NULL THEN 0 ELSE 1 END AS c_subscribed,
+         c.last_fetched_at AS c_last_fetched_at
   FROM videos v
-  LEFT JOIN channels c ON c.id = v.channel_id`
+  LEFT JOIN channels c ON c.id = v.channel_id
+  LEFT JOIN profile_subscriptions s ON s.channel_id = c.id AND s.profile_id = ?1`
 
 function toJoined(row: JoinedRow): VideoWithChannel {
   const video = toVideo(row)
@@ -328,16 +385,18 @@ function toJoined(row: JoinedRow): VideoWithChannel {
  */
 export async function loadVideosWithChannels(
   db: D1Database,
+  profileId: string,
   ids: string[],
 ): Promise<VideoWithChannel[]> {
   const CHUNK = 100
   const loaded: VideoWithChannel[] = []
   for (let offset = 0; offset < ids.length; offset += CHUNK) {
     const chunk = ids.slice(offset, offset + CHUNK)
-    const placeholders = chunk.map((_, index) => `?${index + 1}`).join(', ')
+    // `?1` is the profile the join needs, so the ids start at `?2`.
+    const placeholders = chunk.map((_, index) => `?${index + 2}`).join(', ')
     const { results } = await db
       .prepare(`${JOIN_SELECT} WHERE v.id IN (${placeholders})`)
-      .bind(...chunk)
+      .bind(profileId, ...chunk)
       .all<JoinedRow>()
     for (const row of results ?? []) loaded.push(toJoined(row))
   }
@@ -345,10 +404,12 @@ export async function loadVideosWithChannels(
 }
 
 export interface CandidateQuery {
+  /** Whose subscriptions decide the `subscribed` lane, and the ranking bonus. */
+  profileId: string
   /** Only videos published (or, failing that, discovered) at or after this instant. */
   publishedAfter: EpochMillis
   limit: number
-  /** Restrict to subscribed channels, or exclude them. */
+  /** Restrict to channels this profile follows, or exclude them. */
   subscribed?: boolean
   /** Videos this profile has already rated, which the feed does not need to offer again. */
   excludeRatedBy?: string
@@ -365,12 +426,14 @@ export async function listCandidates(
   db: D1Database,
   query: CandidateQuery,
 ): Promise<VideoWithChannel[]> {
-  const conditions = ['COALESCE(v.published_at, v.discovered_at) >= ?1']
-  const bindings: unknown[] = [query.publishedAfter]
+  // The profile is `?1` because `JOIN_SELECT` needs it there.
+  const bindings: unknown[] = [query.profileId, query.publishedAfter]
+  const conditions = ['COALESCE(v.published_at, v.discovered_at) >= ?2']
 
   if (query.subscribed !== undefined) {
-    bindings.push(query.subscribed ? 1 : 0)
-    conditions.push(`COALESCE(c.subscribed, 0) = ?${bindings.length}`)
+    // Tested through the join rather than against the projected column: SQLite does not
+    // reliably allow a select alias in `WHERE`.
+    conditions.push(query.subscribed ? 's.channel_id IS NOT NULL' : 's.channel_id IS NULL')
   }
   if (query.excludeRatedBy) {
     bindings.push(query.excludeRatedBy)

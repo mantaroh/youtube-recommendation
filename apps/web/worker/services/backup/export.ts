@@ -31,7 +31,7 @@ export async function buildExport(env: Env, profileId: string): Promise<ExportBu
   const [ratings, interests, channels, settings] = await Promise.all([
     listAllRatings(env.DB, profileId, { includeDisabled: true }),
     listInterests(env.DB, profileId),
-    listChannels(env.DB, { subscribedOnly: true }),
+    listChannels(env.DB, profileId, { subscribedOnly: true }),
     loadSettings(env.DB, profileId),
   ])
 

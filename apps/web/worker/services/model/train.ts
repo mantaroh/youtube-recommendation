@@ -142,7 +142,7 @@ export async function buildTrainingSet(db: D1Database, profileId: string): Promi
   if (ratings.size === 0) return []
 
   const events: TrainEvent[] = []
-  for (const { video, channel } of await loadVideosWithChannels(db, [...ratings.keys()])) {
+  for (const { video, channel } of await loadVideosWithChannels(db, profileId, [...ratings.keys()])) {
     const rating = ratings.get(video.id)
     if (rating === undefined) continue
     events.push({

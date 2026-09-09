@@ -56,12 +56,14 @@ export async function buildFeed(db: D1Database, options: BuildFeedOptions): Prom
   // neighbour that happens to have more candidates (design section 34).
   const [subscriptionPool, otherPool] = await Promise.all([
     listCandidates(db, {
+      profileId,
       publishedAfter,
       limit: size * 6,
       subscribed: true,
       excludeRatedBy: profileId,
     }),
     listCandidates(db, {
+      profileId,
       publishedAfter,
       limit: size * 10,
       subscribed: false,

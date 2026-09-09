@@ -18,7 +18,7 @@ videoRoutes.get('/videos/:id', async (context) => {
   const app = context.get('app')
   const id = context.req.param('id')
 
-  const [loaded] = await loadVideosWithChannels(app.env.DB, [id])
+  const [loaded] = await loadVideosWithChannels(app.env.DB, app.profileId, [id])
   if (!loaded) return context.json({ error: 'not found' }, 404)
 
   const model = await activeModel(app.env.DB, app.profileId)

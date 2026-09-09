@@ -1,5 +1,5 @@
 import type { SourceItem } from '@ypr/domain'
-import { upsertChannels, upsertVideos } from '../db/videos.js'
+import { addSubscriptions, upsertChannels, upsertVideos } from '../db/videos.js'
 
 /**
  * Rows for tests to work against.
@@ -14,7 +14,9 @@ export interface SeedVideoOptions {
   title?: string
   channelExternalId?: string
   channelTitle?: string
+  /** Subscribed by `profileId`, which is the default profile unless given. */
   subscribed?: boolean
+  profileId?: string
   publishedAt?: number
   viewCount?: number
   tags?: string[]
@@ -37,8 +39,14 @@ export async function seedVideo(db: D1Database, options: SeedVideoOptions): Prom
         thumbnailUrl: null,
       },
     ],
-    { now, ...(options.subscribed === undefined ? {} : { subscribed: options.subscribed }) },
+    { now },
   )
+
+  // Following is a profile's relation to the channel, not a property of it
+  // (migration 0008), so it is written separately from the channel row.
+  if (options.subscribed) {
+    await addSubscriptions(db, options.profileId ?? 'default', [`youtube:${channelExternalId}`], now)
+  }
 
   const item: SourceItem = {
     externalId,

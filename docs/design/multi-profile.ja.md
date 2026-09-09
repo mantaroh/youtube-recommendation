@@ -27,11 +27,53 @@ yt-<name>.mantaroh.com → profile "<name>"
 |---|---|---|
 | `profiles` テーブル | ある（`id`, `name`, `created_at`） | なし |
 | 評価・興味・スコア・モデル | 全テーブルに `profile_id` | なし |
+| 購読チャンネル | **`channels.subscribed` が全プロファイル共有だった** | **移行が必要だった（0008）** |
 | OAuth トークン | `accessTokenFor(db, profileId, 'youtube', …)` で**プロファイル別に保存済み** | なし |
 | エンジンのボリューム | `project_config/<profile>/` で分離済み | なし |
 | 埋め込みモデルの重み | ボリューム直下で共有（3.4GB×1のまま） | なし |
 
 足りないのは入口だけ。`profileId` が `DEFAULT_PROFILE_ID` 固定で埋まっている箇所が4つある。
+
+### 訂正（2026-09-09）
+
+**上の「ほとんど作らなくて済む」は誤りだった。** テーブルを数えるときに `channels` を見落とし、
+購読が個人のものだという点を落としていた。実際に起きたことは次の2つ。
+
+1. `channels.subscribed` が全プロファイル共有で、**`private` のフィードが `default` の購読54件から作られた。**
+   報告された「`yt.mantaroh.com` の内容がサジェストされる」はこれ。
+2. `setSubscribed` がプロファイルを見ずに全解除していたので、
+   **`private` で YouTube を繋いだ時点で `default` の購読が消えるところだった。**
+
+さらに `youtubeCredentials` の呼び出し4箇所すべてが `profileId` を渡しておらず、
+既定値の `default` に落ちていた。**探索も購読同期も `default` のトークンを使っていた。**
+
+対応は `migrations/0008_profile_subscriptions.sql` と、
+購読を `profile_subscriptions` に出す変更。詳細は下の「購読の分離」を参照。
+
+## 購読の分離
+
+`channels` に `profile_id` を足すのではなく、関係だけを別テーブルに出す。
+題名やサムネイルはカタログの事実で、プロファイルごとに複製する意味がない。
+
+```sql
+CREATE TABLE profile_subscriptions (
+  profile_id, channel_id, subscribed_at,
+  PRIMARY KEY (profile_id, channel_id)
+);
+```
+
+`channels.subscribed` は残さず削除した。**更新されない列が妥当な値を持ったままだと、
+次に `channels` に対して書かれるクエリが黙って間違う。** この不具合が戻ってくる経路そのもの。
+
+`listChannelsToRefresh` だけは全プロファイルの和集合で回す。
+取得した動画は共有カタログに入るので、プロファイルごとに歩くと同じ動画に同じクォータを二重に払うことになる。
+
+### 検証
+
+`worker/test/profile-isolation.test.ts` を追加した。
+**「片方に他方のものが出ない」という不在の検証**にしてある。
+今回の不具合は何も失敗せず、ただ間違ったフィードが出ただけだったので、
+存在を確かめる検証では捕まらない。
 
 ## 変更するファイル
 
@@ -133,4 +175,4 @@ const redirectUri = new URL(request.url).origin + '/api/auth/youtube/callback'
 ## ターン数
 
 - 予定: 設計 1 / 実装 2
-- 実績: 設計 1 / 実装 1
+- 実績: 設計 1 / 実装 2（購読の分離漏れによる差し戻しを含む）
