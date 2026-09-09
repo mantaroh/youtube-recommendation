@@ -37,3 +37,6 @@ __pycache__/
 
 # Runner credentials: the worker bearer token and the Access service token.
 engine-credentials.env
+
+# Database exports taken before a migration. They hold the ratings.
+.backups/
