@@ -26,11 +26,29 @@ const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
  */
 export const YOUTUBE_SCOPE = 'https://www.googleapis.com/auth/youtube.readonly'
 
+/**
+ * What is asked for at the consent screen: the read-only YouTube scope, plus enough to
+ * learn which account said yes.
+ *
+ * `openid email` is there so the Settings screen can name the connected account. With
+ * one profile the Access identity stood in for it; with a hostname per account, the
+ * Access identity is the same on both and says nothing about which YouTube account each
+ * is learning from.
+ *
+ * It costs no request: `openid` makes Google return an `id_token` alongside the access
+ * token, and the address is inside it. It does cost a fresh consent — a widened scope is
+ * a new grant — so an account connected under the old scope keeps working and has no
+ * address recorded until it is connected again.
+ */
+export const REQUESTED_SCOPES = `${YOUTUBE_SCOPE} openid email`
+
 export interface StoredToken {
   accessToken: string
   refreshToken: string | null
   scope: string | null
   expiresAt: EpochMillis | null
+  /** The address that consented, when `openid` was granted. */
+  accountEmail?: string | null
 }
 
 export interface OAuthConfig {
@@ -45,7 +63,7 @@ export function authorizationUrl(config: OAuthConfig, state: string): string {
   url.searchParams.set('client_id', config.clientId)
   url.searchParams.set('redirect_uri', config.redirectUri)
   url.searchParams.set('response_type', 'code')
-  url.searchParams.set('scope', YOUTUBE_SCOPE)
+  url.searchParams.set('scope', REQUESTED_SCOPES)
   // A refresh token is only issued with both of these, and only on the first consent.
   // Without it the connection would quietly stop working after an hour.
   url.searchParams.set('access_type', 'offline')
@@ -68,10 +86,37 @@ export function authorizationUrl(config: OAuthConfig, state: string): string {
 interface TokenResponse {
   access_token?: string
   refresh_token?: string
+  /** Present when `openid` was among the granted scopes. */
+  id_token?: string
   expires_in?: number
   scope?: string
   error?: string
   error_description?: string
+}
+
+/**
+ * The address out of an `id_token`, without verifying its signature.
+ *
+ * Normally that would be indefensible. Here the token did not arrive from a browser or
+ * a third party: it is the body of a TLS response from Google's own token endpoint, to
+ * a request carrying this application's client secret. There is nowhere for a forged
+ * one to have come from, and Google documents this as the case where verification is
+ * unnecessary.
+ *
+ * Returns null on anything unexpected. A missing address is a blank field on a settings
+ * screen; throwing here would fail a connection that is otherwise complete.
+ */
+export function emailFromIdToken(idToken: string | undefined): string | null {
+  if (!idToken) return null
+  const [, body] = idToken.split('.')
+  if (!body) return null
+  try {
+    const json = atob(body.replace(/-/g, '+').replace(/_/g, '/'))
+    const claims = JSON.parse(json) as { email?: unknown }
+    return typeof claims.email === 'string' && claims.email ? claims.email : null
+  } catch {
+    return null
+  }
 }
 
 export async function exchangeCode(
@@ -96,6 +141,7 @@ export async function exchangeCode(
     refreshToken: payload.refresh_token ?? null,
     scope: payload.scope ?? null,
     expiresAt: payload.expires_in ? now + payload.expires_in * 1000 : null,
+    accountEmail: emailFromIdToken(payload.id_token),
   }
 }
 
@@ -207,6 +253,7 @@ interface TokenRow {
   refresh_iv: string | null
   scope: string | null
   expires_at: number | null
+  account_email: string | null
 }
 
 export async function saveToken(
@@ -223,8 +270,8 @@ export async function saveToken(
   await db
     .prepare(
       `INSERT INTO oauth_tokens
-         (profile_id, source, access_token, refresh_token, access_iv, refresh_iv, scope, expires_at, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+         (profile_id, source, access_token, refresh_token, access_iv, refresh_iv, scope, expires_at, account_email, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
        ON CONFLICT(profile_id, source) DO UPDATE SET
          access_token = excluded.access_token,
          access_iv = excluded.access_iv,
@@ -232,6 +279,8 @@ export async function saveToken(
          refresh_iv = COALESCE(excluded.refresh_iv, oauth_tokens.refresh_iv),
          scope = excluded.scope,
          expires_at = excluded.expires_at,
+         -- A refresh carries no id_token, so it must not blank an address already known.
+         account_email = COALESCE(excluded.account_email, oauth_tokens.account_email),
          updated_at = excluded.updated_at`,
     )
     .bind(
@@ -243,6 +292,7 @@ export async function saveToken(
       refresh?.iv ?? null,
       token.scope,
       token.expiresAt,
+      token.accountEmail ?? null,
       now,
     )
     .run()
@@ -268,7 +318,26 @@ export async function loadToken(
         : null,
     scope: row.scope,
     expiresAt: row.expires_at,
+    accountEmail: row.account_email,
   }
+}
+
+/**
+ * The address of the connected account, without decrypting anything.
+ *
+ * The Settings screen wants to name the account and has no business handling the token
+ * to do it, so this reads the one column rather than going through `loadToken`.
+ */
+export async function connectedAccountEmail(
+  db: D1Database,
+  profileId: string,
+  source: Source,
+): Promise<string | null> {
+  const row = await db
+    .prepare('SELECT account_email FROM oauth_tokens WHERE profile_id = ?1 AND source = ?2')
+    .bind(profileId, source)
+    .first<{ account_email: string | null }>()
+  return row?.account_email ?? null
 }
 
 export async function deleteToken(db: D1Database, profileId: string, source: Source): Promise<void> {

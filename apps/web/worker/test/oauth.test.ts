@@ -10,6 +10,8 @@ import {
   purgeExpiredStates,
   saveToken,
   seal,
+  emailFromIdToken,
+  REQUESTED_SCOPES,
   YOUTUBE_SCOPE,
 } from '../services/youtube/oauth.js'
 import { oauthConfig } from '../services/youtube/credentials.js'
@@ -39,7 +41,8 @@ const CONFIG = {
 describe('the authorization request', () => {
   it('asks for read-only access and for a refresh token', () => {
     const url = new URL(authorizationUrl(CONFIG, 'state-1'))
-    expect(url.searchParams.get('scope')).toBe(YOUTUBE_SCOPE)
+    expect(url.searchParams.get('scope')).toBe(REQUESTED_SCOPES)
+    expect(url.searchParams.get('scope')).toContain(YOUTUBE_SCOPE)
     expect(url.searchParams.get('scope')).toContain('readonly')
     // Without both of these Google issues no refresh token, and the connection would
     // stop working an hour later.
@@ -54,8 +57,44 @@ describe('the authorization request', () => {
     // else then fails with `invalid_request` before the consent screen appears.
     const url = new URL(authorizationUrl(CONFIG, 'state-1'))
     expect(url.searchParams.get('include_granted_scopes')).toBeNull()
-    // One scope requested, one scope used.
-    expect(url.searchParams.get('scope')?.split(' ')).toHaveLength(1)
+    // Exactly the three that are used, spelled out rather than counted: the point of
+    // this test is that nothing creeps into the consent screen, and a count would pass
+    // just as happily if one of them were swapped for a write scope.
+    expect(url.searchParams.get('scope')?.split(' ').sort()).toEqual([
+      'email',
+      'https://www.googleapis.com/auth/youtube.readonly',
+      'openid',
+    ])
+    expect(url.searchParams.get('scope')).not.toContain('force-ssl')
+  })
+})
+
+describe('naming the account that consented', () => {
+  /**
+   * Read from the `id_token` without verifying its signature, which is only defensible
+   * because of where it comes from: the body of a TLS response from Google's token
+   * endpoint to a request carrying this client's secret.
+   */
+  function idToken(claims: Record<string, unknown>): string {
+    const body = btoa(JSON.stringify(claims)).replace(/\+/g, '-').replace(/\//g, '_')
+    return `header.${body}.signature`
+  }
+
+  it('takes the address out of the claims', () => {
+    expect(emailFromIdToken(idToken({ email: 'someone@example.com', sub: '1' }))).toBe(
+      'someone@example.com',
+    )
+  })
+
+  it('is null rather than an error when there is nothing to read', () => {
+    // A blank field on a settings screen; not a reason to fail a connection that is
+    // otherwise complete.
+    expect(emailFromIdToken(undefined)).toBeNull()
+    expect(emailFromIdToken('not-a-jwt')).toBeNull()
+    expect(emailFromIdToken('header..signature')).toBeNull()
+    expect(emailFromIdToken(idToken({ sub: '1' }))).toBeNull()
+    expect(emailFromIdToken(idToken({ email: '' }))).toBeNull()
+    expect(emailFromIdToken(idToken({ email: 42 }))).toBeNull()
   })
 })
 

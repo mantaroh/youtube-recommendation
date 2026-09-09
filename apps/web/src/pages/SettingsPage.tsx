@@ -66,12 +66,16 @@ export function SettingsPage() {
       <div className="panel">
         <h2>State</h2>
         <dl className="facts">
-          <div><dt>Signed in as</dt><dd>{status.identity ?? 'Access not configured'}</dd></div>
           {/*
-            Which YouTube account this hostname is for. Shown because the ratings, the
-            model and the feed all belong to it, and the only other thing on screen that
-            says which one you are looking at is the address bar.
+            Two identities, kept apart on purpose. The first is who Cloudflare Access
+            let through, which is the same person on every hostname and says nothing
+            about which account is being learned. The second is the one that differs.
           */}
+          <div><dt>Access identity</dt><dd>{status.identity ?? 'Access not configured'}</dd></div>
+          <div>
+            <dt>YouTube account</dt>
+            <dd>{status.youtubeAccount ?? (status.configured.oauth ? 'not connected' : 'OAuth not configured')}</dd>
+          </div>
           <div><dt>Preference profile</dt><dd>{status.profileId}</dd></div>
           <div><dt>Videos in the catalog</dt><dd>{status.videos}</dd></div>
           <div><dt>Subscribed channels</dt><dd>{status.subscribedChannels}</dd></div>

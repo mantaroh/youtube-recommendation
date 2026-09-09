@@ -52,6 +52,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface StatusResponse {
   identity: string | null
+  /** The connected YouTube account, once one has consented under the wider scope. */
+  youtubeAccount: string | null
   profileId: string
   videos: number
   subscribedChannels: number

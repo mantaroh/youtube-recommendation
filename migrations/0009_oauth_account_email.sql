@@ -1,0 +1,12 @@
+-- Which YouTube account a profile is learning from.
+--
+-- The Settings screen showed one identity: the address Cloudflare Access authenticated,
+-- which is the person looking at the page. With one profile that read as "the account
+-- this is about". With two hostnames it is the same address on both, and the thing that
+-- actually differs between them — which YouTube account each is connected to — was not
+-- recorded anywhere.
+--
+-- Nullable, because it is only known once an account has been connected under the wider
+-- scope. A connection made before this exists keeps working and simply has no address to
+-- show until it is reconnected.
+ALTER TABLE oauth_tokens ADD COLUMN account_email TEXT;

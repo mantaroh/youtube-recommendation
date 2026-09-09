@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { AppBindings } from './types.js'
 import { backupToR2, buildExport } from '../services/backup/export.js'
 import { countVideos, listChannels } from '../db/videos.js'
+import { connectedAccountEmail } from '../services/youtube/oauth.js'
 import { activeModel } from '../db/models.js'
 import { listAllRatings } from '../db/ratings.js'
 import { usedToday } from '../db/quota.js'
@@ -19,16 +20,22 @@ export const dataRoutes = new Hono<AppBindings>()
 
 dataRoutes.get('/status', async (context) => {
   const app = context.get('app')
-  const [videos, channels, ratings, model, searchUsed] = await Promise.all([
+  const [videos, channels, ratings, model, searchUsed, youtubeAccount] = await Promise.all([
     countVideos(app.env.DB),
     listChannels(app.env.DB, app.profileId, { subscribedOnly: true }),
     listAllRatings(app.env.DB, app.profileId),
     activeModel(app.env.DB, app.profileId),
     usedToday(app.env.DB, 'search', app.now),
+    connectedAccountEmail(app.env.DB, app.profileId, 'youtube'),
   ])
 
   return context.json({
+    // Two different identities, and conflating them is what made this necessary.
+    // `identity` is who Access let in — the same person on every hostname.
+    // `youtubeAccount` is whose taste this profile is learning, which is the thing that
+    // actually differs between them.
     identity: app.identity,
+    youtubeAccount,
     profileId: app.profileId,
     videos,
     subscribedChannels: channels.length,
