@@ -61,7 +61,7 @@ export async function seedVideo(db: D1Database, options: SeedVideoOptions): Prom
     officialCategoryId: '28',
   }
 
-  await upsertVideos(db, 'youtube', [item], { now })
+  await upsertVideos(db, 'youtube', [item], { now, profileId: options.profileId ?? 'default' })
   return `youtube:${externalId}`
 }
 

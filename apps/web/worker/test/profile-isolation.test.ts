@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ensureProfile } from '../db/settings.js'
 import {
+  addCandidates,
   listChannels,
   listChannelsToRefresh,
   markChannelsFetched,
@@ -182,5 +183,53 @@ describe('a newly subscribed channel', () => {
 
     const [channel] = await listChannels(db, 'default', { subscribedOnly: true })
     expect(channel.lastFetchedAt).toBe(NOW)
+  })
+})
+
+describe('the candidate pool belongs to one profile', () => {
+  /**
+   * The catalog is shared and the feed is not. Both directions of this were reported: a
+   * hundred and thirty videos from the second account's channels appeared in the first
+   * account's explore lane, and three thousand of the first's appeared in the second's.
+   * Storing one copy of a video was right; treating it as everyone's candidate was not.
+   */
+  it('does not offer a profile what another profile\'s discovery found', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:mine', publishedAt: NOW - 86_400_000 })
+    await seedVideo(db, {
+      id: 'youtube:theirs',
+      profileId: 'private',
+      channelExternalId: 'UCtheirs',
+      publishedAt: NOW - 86_400_000,
+    })
+
+    const mine = await buildFeed(db, { profileId: 'default', now: NOW })
+    const theirs = await buildFeed(db, { profileId: 'private', now: NOW })
+
+    expect(mine.items.map((item) => item.video.id)).toEqual(['youtube:mine'])
+    expect(theirs.items.map((item) => item.video.id)).toEqual(['youtube:theirs'])
+  })
+
+  it('offers a video to both when both found it', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:common', publishedAt: NOW - 86_400_000 })
+    // The same video reached by the other profile's discovery: one row, two candidacies.
+    await addCandidates(db, 'private', ['youtube:common'], NOW)
+
+    for (const profileId of ['default', 'private']) {
+      const feed = await buildFeed(db, { profileId, now: NOW })
+      expect(feed.items.map((item) => item.video.id)).toEqual(['youtube:common'])
+    }
+  })
+
+  it('stores the video once however many profiles reach it', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:common', publishedAt: NOW - 86_400_000 })
+    await addCandidates(db, 'private', ['youtube:common'], NOW)
+
+    // The point of the shared catalog: not two rows, and not two fetches of the
+    // metadata to build them.
+    const row = await db.prepare('SELECT COUNT(*) AS n FROM videos').first<{ n: number }>()
+    expect(row?.n).toBe(1)
   })
 })

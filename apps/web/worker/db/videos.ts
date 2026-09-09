@@ -55,9 +55,44 @@ export async function upsertChannels(
 
 export interface UpsertVideoOptions {
   now: EpochMillis
+  /**
+   * Whose discovery found these. The row itself is shared — the catalog holds one copy
+   * of a video however many profiles reach it — but being *in* the catalog is not the
+   * same as being a candidate for a profile's feed (migration 0010).
+   */
+  profileId: string
   /** Recorded in metadata so quota spend can be attributed to a lane afterwards. */
   discoveredBy?: VideoMetadata['discoveredBy']
   discoveryQuery?: string
+}
+
+/**
+ * Marks videos as candidates for one profile.
+ *
+ * Separate from the video upsert so that a video already in the catalog, reached by a
+ * second profile, becomes a candidate for it without rewriting the row.
+ */
+export async function addCandidates(
+  db: D1Database,
+  profileId: string,
+  videoIds: string[],
+  now: EpochMillis,
+): Promise<void> {
+  if (videoIds.length === 0) return
+  const CHUNK = 100
+  for (let offset = 0; offset < videoIds.length; offset += CHUNK) {
+    await db.batch(
+      videoIds.slice(offset, offset + CHUNK).map((id) =>
+        db
+          .prepare(
+            `INSERT INTO profile_candidates (profile_id, video_id, discovered_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(profile_id, video_id) DO NOTHING`,
+          )
+          .bind(profileId, id, now),
+      ),
+    )
+  }
 }
 
 export async function upsertVideos(
@@ -117,6 +152,15 @@ export async function upsertVideos(
   })
 
   await db.batch(statements)
+
+  // Written after the rows exist, because the candidacy has a foreign key to them.
+  await addCandidates(
+    db,
+    options.profileId,
+    [...unique.keys()].map((externalId) => itemKey({ source, externalId })),
+    options.now,
+  )
+
   return unique.size
 }
 
@@ -433,7 +477,13 @@ export async function listCandidates(
 ): Promise<VideoWithChannel[]> {
   // The profile is `?1` because `JOIN_SELECT` needs it there.
   const bindings: unknown[] = [query.profileId, query.publishedAfter]
-  const conditions = ['COALESCE(v.published_at, v.discovered_at) >= ?2']
+  const conditions = [
+    'COALESCE(v.published_at, v.discovered_at) >= ?2',
+    // Being in the catalog is not being a candidate (migration 0010). The catalog is
+    // shared so a video is stored once; the feed is not, so a video another profile's
+    // discovery found is not offered here.
+    'EXISTS (SELECT 1 FROM profile_candidates pc WHERE pc.video_id = v.id AND pc.profile_id = ?1)',
+  ]
 
   if (query.subscribed !== undefined) {
     // Tested through the join rather than against the projected column: SQLite does not

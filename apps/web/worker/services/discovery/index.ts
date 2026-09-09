@@ -157,7 +157,7 @@ export async function discoverSubscriptions(
 
   const items = videoIds.size > 0 ? await client.listVideos([...videoIds]) : []
   summary.found = items.length
-  summary.stored = await store(env, items, 'subscription')
+  summary.stored = await store(env, profileId, items, 'subscription')
   await markChannelsFetched(env.DB, channels.map((channel) => channel.id), now)
 
   summary.listCalls = client.tally.list
@@ -221,7 +221,7 @@ export async function discoverPopular(
   }
 
   summary.found = items.length
-  summary.stored = await store(env, items, 'explore', `chart:${regions.join(',')}`)
+  summary.stored = await store(env, profileId, items, 'explore', `chart:${regions.join(',')}`)
   summary.listCalls = client.tally.list
   await recordUsage(env.DB, 'list', client.tally.list, now)
   return summary
@@ -293,7 +293,7 @@ async function discoverBySearch(
 
   const items = ids.size > 0 ? await client.listVideos([...ids]) : []
   summary.found = items.length
-  summary.stored = await store(env, items, lane, summary.queries.join(' | '))
+  summary.stored = await store(env, profileId, items, lane, summary.queries.join(' | '))
 
   summary.searchCalls = client.tally.search
   summary.listCalls = client.tally.list
@@ -309,6 +309,7 @@ async function discoverBySearch(
  */
 async function store(
   env: Env,
+  profileId: string,
   items: SourceItem[],
   lane: Lane,
   query?: string,
@@ -318,6 +319,7 @@ async function store(
   await upsertChannels(env.DB, 'youtube', channelsFromItems(items))
   return upsertVideos(env.DB, 'youtube', items, {
     now,
+    profileId,
     discoveredBy: lane,
     ...(query ? { discoveryQuery: query } : {}),
   })
