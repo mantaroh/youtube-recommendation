@@ -84,6 +84,8 @@ export async function addCandidates(
   now: EpochMillis,
 ): Promise<void> {
   if (videoIds.length === 0) return
+  // Statements per batch, not parameters per statement: each of these binds three, so
+  // the hundred-parameter ceiling is nowhere near.
   const CHUNK = 100
   for (let offset = 0; offset < videoIds.length; offset += CHUNK) {
     await db.batch(
@@ -444,7 +446,14 @@ export async function loadVideosWithChannels(
   profileId: string,
   ids: string[],
 ): Promise<VideoWithChannel[]> {
-  const CHUNK = 100
+  // D1 numbers bound parameters `?1` to `?100` and refuses `?101`. The profile the join
+  // needs takes the first, so ninety-nine ids fit, not a hundred.
+  //
+  // It was a hundred, from before the profile was bound at all, and adding it made every
+  // full chunk one over. A scoring batch is exactly a hundred videos, so this was not an
+  // edge case: it broke every score_batch claim with a 500 and cost a night's work
+  // before anyone saw it.
+  const CHUNK = 99
   const loaded: VideoWithChannel[] = []
   for (let offset = 0; offset < ids.length; offset += CHUNK) {
     const chunk = ids.slice(offset, offset + CHUNK)

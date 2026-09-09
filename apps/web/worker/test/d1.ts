@@ -58,6 +58,25 @@ function wrap(sqlite: DatabaseSync): D1Database {
   } as unknown as D1Database
 }
 
+/**
+ * D1 numbers bound parameters `?1` to `?100` and refuses `?101`. SQLite's own ceiling is
+ * far higher, so a statement D1 rejects runs perfectly well here.
+ *
+ * That is not hypothetical. Binding one extra value ahead of a hundred ids took a
+ * night's work out with a 500, and the test written to catch it passed against the
+ * broken code — the harness was happy to bind a hundred and one. Refusing here is the
+ * same reasoning as turning foreign keys on.
+ */
+const MAX_BOUND_PARAMETERS = 100
+
+function checkBindCount(bound: unknown[], sql: string): void {
+  if (bound.length <= MAX_BOUND_PARAMETERS) return
+  throw new Error(
+    `D1_ERROR: variable number must be between ?1 and ?${MAX_BOUND_PARAMETERS} ` +
+      `(bound ${bound.length}): ${sql.slice(0, 120)}`,
+  )
+}
+
 function statementFor(sqlite: DatabaseSync, sql: string, bound: unknown[]): D1PreparedStatement {
   const run = () => {
     const statement = sqlite.prepare(sql)
@@ -70,7 +89,10 @@ function statementFor(sqlite: DatabaseSync, sql: string, bound: unknown[]): D1Pr
   }
 
   return {
-    bind: (...args: unknown[]) => statementFor(sqlite, sql, args),
+    bind: (...args: unknown[]) => {
+      checkBindCount(args, sql)
+      return statementFor(sqlite, sql, args)
+    },
     async all<T = unknown>() {
       const statement = sqlite.prepare(sql)
       const rows = statement.all(...(bound as never[])) as T[]

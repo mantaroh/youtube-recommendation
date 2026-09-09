@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { SCORE_BATCH_SIZE } from '@ypr/domain'
 import { ensureProfile } from '../db/settings.js'
 import {
   addCandidates,
   listChannels,
+  loadVideosWithChannels,
   listChannelsToRefresh,
   markChannelsFetched,
   setSubscribed,
@@ -231,5 +233,42 @@ describe('the candidate pool belongs to one profile', () => {
     // metadata to build them.
     const row = await db.prepare('SELECT COUNT(*) AS n FROM videos').first<{ n: number }>()
     expect(row?.n).toBe(1)
+  })
+})
+
+describe('loading a batch of videos', () => {
+  /**
+   * D1 numbers bound parameters `?1` to `?100` and refuses `?101`.
+   *
+   * The chunk was a hundred, from before the profile was bound at all. Adding the
+   * profile as `?1` made every full chunk one over, and a scoring batch is exactly a
+   * hundred videos — so every `score_batch` claim answered 500 and a night's work was
+   * lost. Nothing in the suite had ever loaded more than a handful at once.
+   */
+  it('loads more videos than D1 allows bound parameters for', async () => {
+    const db = await twoProfiles()
+    const ids: string[] = []
+    for (let index = 0; index < 250; index++) {
+      const id = `youtube:v${index}`
+      await seedVideo(db, { id })
+      ids.push(id)
+    }
+
+    const loaded = await loadVideosWithChannels(db, 'default', ids)
+
+    expect(loaded).toHaveLength(250)
+    expect(new Set(loaded.map((entry) => entry.video.id)).size).toBe(250)
+  })
+
+  it('loads exactly a scoring batch, which is where this broke', async () => {
+    const db = await twoProfiles()
+    const ids: string[] = []
+    for (let index = 0; index < SCORE_BATCH_SIZE; index++) {
+      const id = `youtube:b${index}`
+      await seedVideo(db, { id })
+      ids.push(id)
+    }
+
+    expect(await loadVideosWithChannels(db, 'default', ids)).toHaveLength(SCORE_BATCH_SIZE)
   })
 })
