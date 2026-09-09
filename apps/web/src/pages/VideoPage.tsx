@@ -71,6 +71,30 @@ export function VideoPage({ videoId, onBack, onOpen }: VideoPageProps) {
     }
   }, [videoId])
 
+  /**
+   * Ratings given from the sidebar, over what the feed reported.
+   *
+   * The list is not refetched after a rating, so the stars have to remember what was
+   * pressed or they would spring back to the value the feed was loaded with.
+   */
+  const [ratings, setRatings] = useState<Record<string, RatingValue>>({})
+
+  const rateUpNext = useCallback(async (id: string, rating: RatingValue) => {
+    setRatings((current) => ({ ...current, [id]: rating }))
+    try {
+      await api.rate(id, rating)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+      // Put the control back where it was: leaving it filled would report a rating that
+      // was never recorded.
+      setRatings((current) => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
+    }
+  }, [])
+
   const rate = useCallback(
     async (rating: RatingValue) => {
       setData((current) => (current ? { ...current, rating } : current))
@@ -232,6 +256,21 @@ export function VideoPage({ videoId, onBack, onOpen }: VideoPageProps) {
                       </span>
                     </span>
                   </a>
+                  {/*
+                    Outside the anchor, not inside it: a rating button within a link
+                    opens the video on every press.
+
+                    Rating does not remove the item or reorder the list. Removing it
+                    would make a mis-press unrecoverable, and reordering would move the
+                    next thing you were about to press out from under the cursor — which
+                    is the whole appeal of rating from here, that several can be dealt
+                    with in a row without leaving the video that is playing.
+                  */}
+                  <RatingControl
+                    compact
+                    value={ratings[item.video.id] ?? item.rating ?? null}
+                    onRate={(rating) => void rateUpNext(item.video.id, rating)}
+                  />
                 </li>
               ))}
             </ul>

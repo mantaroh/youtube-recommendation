@@ -267,7 +267,16 @@ body {
 
 .aside-title { font-size: 1rem; margin: 1rem 0 0.75rem; }
 
-.up-next { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.up-next { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.9rem; }
+
+/*
+ * The rating sits under the item rather than beside it. Six controls will not fit in
+ * the 180px left of a 340px column once the thumbnail has taken 160, and shrinking them
+ * to fit would make the difference between "much less" and "a little less" a matter of
+ * hitting a four-pixel target.
+ */
+.up-next > li > .rating { padding: 0 0.25rem; }
+.up-next > li > .rating .rating-star { font-size: 1rem; }
 
 .up-next-item {
   display: grid;
@@ -279,6 +288,7 @@ body {
   padding: 0.25rem;
 }
 .up-next-item:hover { background: var(--surface); }
+.up-next-item { margin-bottom: 0.2rem; }
 
 .up-next-item img,
 .up-next-blank {
