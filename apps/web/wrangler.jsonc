@@ -72,7 +72,22 @@
 
     // Of an allowance of 100 search calls a day (design section 42). The rest is left
     // for manual searching and for a second run on a day when the first found nothing.
-    "DISCOVERY_SEARCH_BUDGET": "30"
+    // Divided between profiles on a run, so that adding a second YouTube account does
+    // not mean the first one spends the whole day's budget before the second is reached.
+    "DISCOVERY_SEARCH_BUDGET": "30",
+
+    // Which YouTube account a hostname is for (docs/design/multi-profile.ja.md). A
+    // table rather than a rule derived from the subdomain: `ensureProfile` inserts on
+    // demand, so any Host the Worker can be reached under would otherwise be able to
+    // create an account with an empty history — a preview URL or a mistyped CNAME
+    // included. An unlisted host answers as `default`.
+    //
+    // Adding a profile takes three things, and the first is the only one that lives
+    // here: an entry below with a route above, the hostname registered in Google Cloud
+    // Console as an authorised redirect URI, and the hostname added to the Cloudflare
+    // Access application. Without the second, authorisation stops at
+    // `redirect_uri_mismatch`; without the third, the host is open.
+    "PROFILE_HOSTS": "{\"yt.mantaroh.com\":\"default\"}"
   }
 
   // Secrets, set with `wrangler secret put` (design section 43):

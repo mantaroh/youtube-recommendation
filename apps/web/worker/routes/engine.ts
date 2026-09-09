@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { ClaimResponse, EpochMillis } from '@ypr/domain'
-import { DEFAULT_PROFILE_ID, JOB_LEASE_MINUTES } from '@ypr/domain'
+import { JOB_LEASE_MINUTES } from '@ypr/domain'
 import type { Env } from '../env.js'
 import { claimNextJob, getJob, markCompleted } from '../db/jobs.js'
 import { applyResult, failJob } from '../services/model/reconcile.js'
@@ -119,10 +119,32 @@ engineRoutes.post('/engine/jobs/:id/fail', async (context) => {
   return context.json({ ok: true })
 })
 
-/** What the runner needs to know before it starts: is there anything to do at all. */
+/**
+ * What the runner needs to know before it starts: is there anything to do at all.
+ *
+ * Broken down by profile because one runner serves all of them, and a total on its own
+ * hides the case worth seeing — one account's queue draining while another's stands
+ * still. It previously reported the default profile's name beside a count of every
+ * profile's work, which was simply wrong once there was more than one.
+ */
 engineRoutes.get('/engine/status', async (context) => {
-  const row = await context.env.DB.prepare(
-    `SELECT COUNT(*) AS queued FROM gpu_jobs WHERE status = 'queued'`,
-  ).first<{ queued: number }>()
-  return context.json({ profileId: DEFAULT_PROFILE_ID, queued: row?.queued ?? 0 })
+  const { results } = await context.env.DB.prepare(
+    `SELECT COALESCE(json_extract(context_json, '$.profileId'), 'unknown') AS profile_id,
+            type,
+            COUNT(*) AS queued
+       FROM gpu_jobs
+      WHERE status = 'queued'
+      GROUP BY profile_id, type`,
+  ).all<{ profile_id: string; type: string; queued: number }>()
+
+  const rows = results ?? []
+  const byProfile: Record<string, Record<string, number>> = {}
+  let queued = 0
+  for (const row of rows) {
+    byProfile[row.profile_id] ??= {}
+    byProfile[row.profile_id][row.type] = row.queued
+    queued += row.queued
+  }
+
+  return context.json({ queued, byProfile })
 })

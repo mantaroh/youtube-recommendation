@@ -19,19 +19,34 @@ export interface ResolvedCredentials {
   accessToken?: string
 }
 
-export function oauthConfig(env: Env): OAuthConfig | null {
-  if (
-    !env.GOOGLE_CLIENT_ID ||
-    !env.GOOGLE_CLIENT_SECRET ||
-    !env.OAUTH_REDIRECT_URI ||
-    !env.OAUTH_ENCRYPTION_KEY
-  ) {
+export const OAUTH_CALLBACK_PATH = '/api/auth/youtube/callback'
+
+/**
+ * `requestOrigin` is how one client secret serves several hostnames.
+ *
+ * Each YouTube account has its own host (`docs/design/multi-profile.ja.md`), and the
+ * authorisation flow has to return to the host it started on, so the redirect URI cannot
+ * be a single stored value. Deriving it from the request is safe because the two calls
+ * that need it — building the authorisation URL and exchanging the code — happen on the
+ * same host by construction: Google sends the browser back to the URI it was given.
+ *
+ * `refreshToken` does not send a redirect URI at all, which is why the paths with no
+ * request behind them (the cron refreshing a token) are unaffected and can keep using
+ * the stored value.
+ *
+ * Each host still has to be listed in Google Cloud Console as an authorised redirect
+ * URI. Nothing here can arrange that, and without it the flow stops at
+ * `redirect_uri_mismatch`.
+ */
+export function oauthConfig(env: Env, requestOrigin?: string): OAuthConfig | null {
+  const redirectUri = requestOrigin ? `${requestOrigin}${OAUTH_CALLBACK_PATH}` : env.OAUTH_REDIRECT_URI
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !redirectUri || !env.OAUTH_ENCRYPTION_KEY) {
     return null
   }
   return {
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,
-    redirectUri: env.OAUTH_REDIRECT_URI,
+    redirectUri,
     encryptionKey: env.OAUTH_ENCRYPTION_KEY,
   }
 }

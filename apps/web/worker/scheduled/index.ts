@@ -1,5 +1,5 @@
 import type { EpochMillis } from '@ypr/domain'
-import { DEFAULT_PROFILE_ID } from '@ypr/domain'
+import { DEFAULT_PROFILE_ID, DISCOVERY_SEARCH_BUDGET } from '@ypr/domain'
 import type { Env } from '../env.js'
 import { runDiscovery, syncSubscriptions } from '../services/discovery/index.js'
 import { reconcileJobs } from '../services/model/reconcile.js'
@@ -7,7 +7,7 @@ import { submitScoring } from '../services/model/score.js'
 import { NotEnoughRatings, submitTraining } from '../services/model/train.js'
 import { backupToR2 } from '../services/backup/export.js'
 import { purgeExpiredStates } from '../services/youtube/oauth.js'
-import { loadSettings, readMarker, writeMarker } from '../db/settings.js'
+import { listProfiles, loadSettings, readMarker, writeMarker } from '../db/settings.js'
 import { countRatingsSince } from '../db/ratings.js'
 import { activeModel } from '../db/models.js'
 
@@ -32,41 +32,75 @@ import { activeModel } from '../db/models.js'
 
 export interface ScheduledSummary {
   task: string
+  /** Absent on work that is not per-profile, such as reconciling the job ledger. */
+  profileId?: string
   detail: unknown
+}
+
+/**
+ * The search allowance one profile may spend today.
+ *
+ * `api_quota_usage` is keyed by day and operation, not by profile, and that is correct:
+ * the quota belongs to the API key, which every profile shares. But it means an
+ * undivided budget is spent by whichever profile the loop reaches first, and the others
+ * find nothing left — one account's recommendations grow while the other's stand still.
+ *
+ * Dividing it means both move every day, more slowly. At least one call each, so a
+ * third profile does not silently reduce everyone to zero.
+ */
+function searchBudgetPerProfile(env: Env, profileCount: number): number {
+  const ceiling = Number(env.DISCOVERY_SEARCH_BUDGET ?? DISCOVERY_SEARCH_BUDGET)
+  return Math.max(1, Math.floor(ceiling / Math.max(1, profileCount)))
 }
 
 export async function runScheduled(env: Env, now: EpochMillis): Promise<ScheduledSummary[]> {
   const hour = new Date(now).getUTCHours()
   const day = new Date(now).getUTCDay()
   const summaries: ScheduledSummary[] = []
-  const profileId = DEFAULT_PROFILE_ID
 
   // Cheap, and worth doing on every run: expired redirect state is a table that only
   // ever grows otherwise.
   await purgeExpiredStates(env.DB, now)
 
-  if (hour === 0 || hour === 12) {
-    summaries.push({ task: 'subscriptions', detail: await refreshSubscriptions(env, profileId, now) })
+  const profiles = await listProfiles(env.DB)
+  // A database with no profile row yet still has work to do on the default one — the
+  // row is written by the first request, and the cron can fire before that.
+  const targets = profiles.length > 0 ? profiles : [DEFAULT_PROFILE_ID]
+
+  for (const profileId of targets) {
+    if (hour === 0 || hour === 12) {
+      summaries.push({
+        task: 'subscriptions',
+        profileId,
+        detail: await refreshSubscriptions(env, profileId, now),
+      })
+    }
+
+    if (hour === 6) {
+      summaries.push({
+        task: 'discovery',
+        profileId,
+        detail: await runDiscovery(env, profileId, now, {
+          lanes: ['related', 'explore'],
+          searchBudget: searchBudgetPerProfile(env, targets.length),
+        }),
+      })
+      // New candidates are unscored, and an unscored video ranks as merely average. This
+      // is what turns a discovery run into something the feed can act on.
+      summaries.push({ task: 'scoring', profileId, detail: await scoreQuietly(env, profileId, now) })
+    }
+
+    // Weekly, on Sunday, alongside the job check.
+    if (day === 0 && hour === 18) {
+      summaries.push({ task: 'retrain', profileId, detail: await maybeRetrain(env, profileId, now) })
+      summaries.push({ task: 'backup', profileId, detail: await backupToR2(env, profileId, now) })
+    }
   }
 
-  if (hour === 6) {
-    summaries.push({
-      task: 'discovery',
-      detail: await runDiscovery(env, profileId, now, { lanes: ['related', 'explore'] }),
-    })
-    // New candidates are unscored, and an unscored video ranks as merely average. This
-    // is what turns a discovery run into something the feed can act on.
-    summaries.push({ task: 'scoring', detail: await scoreQuietly(env, profileId, now) })
-  }
-
+  // Once, not per profile: the job ledger is shared, and reconciliation works on rows
+  // rather than on a profile's data.
   if (hour === 18) {
     summaries.push({ task: 'jobs', detail: await reconcileJobs(env, now) })
-  }
-
-  // Weekly, on Sunday, alongside the job check.
-  if (day === 0 && hour === 18) {
-    summaries.push({ task: 'retrain', detail: await maybeRetrain(env, profileId, now) })
-    summaries.push({ task: 'backup', detail: await backupToR2(env, profileId, now) })
   }
 
   return summaries

@@ -104,3 +104,17 @@ export async function ensureProfile(
     .bind(profileId, now)
     .run()
 }
+
+/**
+ * Every profile that exists, oldest first.
+ *
+ * The host table in `PROFILE_HOSTS` says which profiles are *reachable*; this says which
+ * ones have data. Scheduled work follows this one, because a profile whose hostname has
+ * been taken away still has ratings and a model that should keep being maintained.
+ */
+export async function listProfiles(db: D1Database): Promise<string[]> {
+  const { results } = await db
+    .prepare('SELECT id FROM profiles ORDER BY created_at ASC, id ASC')
+    .all<{ id: string }>()
+  return (results ?? []).map((row) => row.id)
+}

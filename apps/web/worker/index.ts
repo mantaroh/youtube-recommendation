@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
-import { DEFAULT_PROFILE_ID } from '@ypr/domain'
 import { verifyAccess } from './access.js'
 import type { AppContext, Env } from './env.js'
+import { profileForRequest } from './profile.js'
 import { ensureProfile } from './db/settings.js'
 import type { AppBindings } from './routes/types.js'
 import { authRoutes } from './routes/auth.js'
@@ -45,14 +45,16 @@ app.use('/api/*', async (context, next) => {
   }
 
   const now = Date.now()
-  await ensureProfile(context.env.DB, DEFAULT_PROFILE_ID, now)
+  // The host says which of one person's YouTube accounts this is
+  // (`docs/design/multi-profile.ja.md`). Every table is already keyed by profile, so
+  // this is the whole of the routing.
+  const profileId = profileForRequest(context.env, context.req.url)
+  await ensureProfile(context.env.DB, profileId, now)
 
   const appContext: AppContext = {
     env: context.env,
     identity: result.email,
-    // One profile for now. The column exists everywhere it needs to, so a second one
-    // is a routing change rather than a migration (design section 9.1).
-    profileId: DEFAULT_PROFILE_ID,
+    profileId,
     now,
   }
   context.set('app', appContext)

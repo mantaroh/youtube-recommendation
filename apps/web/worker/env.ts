@@ -48,8 +48,19 @@ export interface Env {
   /** Comma-separated list of addresses allowed through (design section 43). */
   ACCESS_ALLOWED_EMAILS?: string
 
-  /** Absolute URL of `/api/auth/youtube/callback`, as registered with Google. */
+  /**
+   * Fallback absolute URL of `/api/auth/youtube/callback`, as registered with Google.
+   * A request-borne flow derives it from the host it arrived on instead, so that two
+   * hostnames do not need two secrets.
+   */
   OAUTH_REDIRECT_URI?: string
+
+  /**
+   * Hostname to profile, as JSON: `{"yt.example.com":"default","yt-work.example.com":"work"}`.
+   * An unlisted host is the default profile. Deliberately a table and not a rule — see
+   * `worker/profile.ts` for why deriving it from the subdomain is unsafe.
+   */
+  PROFILE_HOSTS?: string
 
   CRAWL_REGIONS?: string
   CRAWL_CATEGORIES?: string

@@ -24,12 +24,12 @@ export const authRoutes = new Hono<AppBindings>()
 
 authRoutes.get('/auth/youtube', async (context) => {
   const app = context.get('app')
-  const config = oauthConfig(app.env)
+  const config = oauthConfig(app.env, new URL(context.req.url).origin)
   if (!config) {
     return context.json(
       {
         error:
-          'OAuth is not configured: set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI and OAUTH_ENCRYPTION_KEY',
+          'OAuth is not configured: set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and OAUTH_ENCRYPTION_KEY',
       },
       503,
     )
@@ -42,7 +42,7 @@ authRoutes.get('/auth/youtube', async (context) => {
 
 authRoutes.get('/auth/youtube/callback', async (context) => {
   const app = context.get('app')
-  const config = oauthConfig(app.env)
+  const config = oauthConfig(app.env, new URL(context.req.url).origin)
   if (!config) return context.json({ error: 'OAuth is not configured' }, 503)
 
   const error = context.req.query('error')
@@ -76,7 +76,7 @@ authRoutes.get('/auth/youtube/callback', async (context) => {
 
 authRoutes.get('/auth/youtube/status', async (context) => {
   const app = context.get('app')
-  const config = oauthConfig(app.env)
+  const config = oauthConfig(app.env, new URL(context.req.url).origin)
   if (!config) {
     return context.json({ configured: false, connected: false })
   }

@@ -67,6 +67,12 @@ export function SettingsPage() {
         <h2>State</h2>
         <dl className="facts">
           <div><dt>Signed in as</dt><dd>{status.identity ?? 'Access not configured'}</dd></div>
+          {/*
+            Which YouTube account this hostname is for. Shown because the ratings, the
+            model and the feed all belong to it, and the only other thing on screen that
+            says which one you are looking at is the address bar.
+          */}
+          <div><dt>Preference profile</dt><dd>{status.profileId}</dd></div>
           <div><dt>Videos in the catalog</dt><dd>{status.videos}</dd></div>
           <div><dt>Subscribed channels</dt><dd>{status.subscribedChannels}</dd></div>
           <div><dt>Ratings recorded</dt><dd>{status.ratings}</dd></div>

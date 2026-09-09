@@ -1,0 +1,136 @@
+# 複数 YouTube アカウントを1つのデプロイで扱う
+
+- 状態: 承認済み・実装完了（2026-09-09 JST）
+- 日付: 2026-09-09 (JST)
+- 前提: `docs/design/personal-preference-model-youtube-recommender-v1.en.md`、`docs/design/pull-engine.ja.md`
+
+## 何をしたいか
+
+同じ人が持つ複数の YouTube アカウントを、それぞれ別の好みとして学習させる。
+登録チャンネルも視聴履歴も違うので、混ぜると片方の推薦がもう片方に引きずられる。
+
+入口はサブドメインで分ける。
+
+```
+yt.mantaroh.com       → profile "default"
+yt-<name>.mantaroh.com → profile "<name>"
+```
+
+見る人は1人なので、Access のポリシーは分ける必要がない。
+分けるのは YouTube の認証、評価、モデル、推薦スコア。
+
+## 結論から言うと、ほとんど作らなくて済む
+
+データ層は最初から複数対応の形になっている。
+
+| 対象 | 現状 | 必要な作業 |
+|---|---|---|
+| `profiles` テーブル | ある（`id`, `name`, `created_at`） | なし |
+| 評価・興味・スコア・モデル | 全テーブルに `profile_id` | なし |
+| OAuth トークン | `accessTokenFor(db, profileId, 'youtube', …)` で**プロファイル別に保存済み** | なし |
+| エンジンのボリューム | `project_config/<profile>/` で分離済み | なし |
+| 埋め込みモデルの重み | ボリューム直下で共有（3.4GB×1のまま） | なし |
+
+足りないのは入口だけ。`profileId` が `DEFAULT_PROFILE_ID` 固定で埋まっている箇所が4つある。
+
+## 変更するファイル
+
+| ファイル | 変更 |
+|---|---|
+| `apps/web/worker/profile.ts` | 新規。ホスト名 → プロファイル の解決 |
+| `apps/web/worker/index.ts` | ミドルウェアでホストから `profileId` を決める |
+| `apps/web/worker/scheduled/index.ts` | cron を全プロファイルで回す |
+| `apps/web/worker/services/youtube/credentials.ts` | リダイレクト URI をリクエスト元から導出 |
+| `apps/web/worker/routes/auth.ts` | 同上の受け渡し |
+| `apps/web/worker/routes/engine.ts` | `/engine/status` の固定値を外す |
+| `apps/web/wrangler.jsonc` | 2つ目のカスタムドメインを追加 |
+| `apps/web/src/pages/SettingsPage.tsx` | いまどのアカウントを見ているかを表示 |
+
+## ホスト名からプロファイルを決める
+
+環境変数に明示的な対応表を持つ。
+
+```jsonc
+// wrangler.jsonc の vars
+"PROFILE_HOSTS": "{\"yt.mantaroh.com\":\"default\",\"yt-sub.mantaroh.com\":\"sub\"}"
+```
+
+### サブドメインから機械的に導出しない
+
+`yt-work.mantaroh.com` から `work` を切り出す方式は却下する。
+
+`ensureProfile` は `INSERT OR IGNORE` なので、**未知のホストで来たリクエストが新しいプロファイルを勝手に作る。**
+`workers.dev` のサブドメイン、プレビュー URL、設定を間違えた CNAME —
+どれも「空の好みを持つ新しいアカウント」を生む。静かに増えるので気づきにくい。
+
+対応表にないホストは `default` にする。
+拒否ではなく `default` にするのは、`workers.dev` の URL が今も動いていて、それを壊す理由がないから。
+
+### 却下した代替案
+
+| 案 | 却下理由 |
+|---|---|
+| パスで分ける（`/work`, `/home`） | Access はアプリ単位でポリシーを持つ。人を分ける必要が出たときに作り直しになる |
+| Worker と D1 をアカウントごとに立てる | デプロイとマイグレーションがアカウント数だけ増える。共有したい埋め込み重みも二重に持つ |
+| ヘッダやクッキーで切り替える | ブックマークできない。どちらを見ているか URL から分からない |
+
+## OAuth リダイレクトをリクエスト元から導出する
+
+いまは `OAUTH_REDIRECT_URI` という単一の秘密値。ホストが2つになると足りない。
+
+`refreshToken` は `redirect_uri` を使わない（使うのは `exchangeCode` だけ）ので、
+**リクエストのオリジンから組み立てて構わない。** cron からのトークン更新は影響を受けない。
+
+```ts
+// 認可開始と callback は必ず同じホストで起きるので、そのホストを使う
+const redirectUri = new URL(request.url).origin + '/api/auth/youtube/callback'
+```
+
+`OAUTH_REDIRECT_URI` は残す。リクエストがない経路のための既定値として使う。
+
+> ⚠️ **Google Cloud Console 側の登録が必要。** 承認済みリダイレクト URI に
+> 新しいホストの分を足さないと、認可の時点で `redirect_uri_mismatch` で止まる。
+> これはコードでは解決できない手作業。
+
+## cron を全プロファイルで回す
+
+`runScheduled` は `profileId` を1つ持っている。`profiles` を読んで回す形に変える。
+
+### クォータは共有される
+
+`api_quota_usage` の主キーは `(day, source, operation)` で、プロファイル別ではない。
+これは正しい。**YouTube のクォータは API キーに属するもので、プロファイルとは無関係。**
+
+ただし結果として、1日の探索予算 `DISCOVERY_SEARCH_BUDGET = 30` を
+プロファイル間で分け合うことになる。
+
+| 選択肢 | 内容 |
+|---|---|
+| そのまま共有 | 先に回ったプロファイルが30回使い切ると、後のプロファイルは探索をしない |
+| プロファイル数で割る | 2つなら各15回。どちらも毎日少しずつ進む |
+
+**後者を採る。** 「毎日どちらかだけが進む」より「両方が半分ずつ進む」ほうが、
+片方だけ推薦が育つ状態を避けられる。`search.list` の実際の上限は100回/日なので、
+プロファイルが増えても合計30回を超えない限り安全側にいる。
+
+## 影響範囲
+
+| 対象 | 影響 |
+|---|---|
+| 既存の `default` プロファイル | なし。対応表に載せるだけで挙動は変わらない |
+| ランナー | なし。ジョブの `profile` を見て動くので、既に対応済み |
+| 学習・採点の所要時間 | **プロファイル数に比例して増える**。1アカウント約20時間なので、2つで約40時間 |
+| Cloudflare Access | 新しいホストを既存アプリに追加する手作業が必要 |
+| DNS | 新しいホストの CNAME をカスタムドメインとして追加（wrangler が作る） |
+
+## やらないこと
+
+- **人を分けること。** 見る人は1人という前提で作る。他人に見せるなら Access の
+  ポリシーとデータの可視性を別に設計する必要があり、それはこの変更の範囲を超える。
+- **プロファイルを UI から作ること。** 対応表と Access の設定が手作業で必要なので、
+  画面から作れるようにしても片手落ちになる。
+
+## ターン数
+
+- 予定: 設計 1 / 実装 2
+- 実績: 設計 1 / 実装 1
