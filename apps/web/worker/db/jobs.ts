@@ -272,3 +272,38 @@ export async function requeue(db: D1Database, id: string): Promise<void> {
     .bind(id)
     .run()
 }
+
+/**
+ * Removes queued scoring work that a newly activated model has made pointless.
+ *
+ * A `score_batch` job names the model version it is for, and the feed only reads scores
+ * from the version that is active. So the moment training activates a new one, every
+ * queued batch for the old version is work whose result nothing will ever look at —
+ * `unscoredVideoIds` will hand the same videos out again under the new version.
+ *
+ * This was not theoretical. Six batches of a hundred ran overnight against a version
+ * that training had already superseded: six and a half hours of a CPU spent producing
+ * rows the feed cannot use. Left alone it recurs on every retrain, because a retrain is
+ * exactly what fires while a long scoring queue is still draining.
+ *
+ * Only `queued` rows. A batch already in flight is left alone: the runner holds a lease
+ * on it and will report a result, and deleting the row underneath it would turn that
+ * report into an error for something that is merely obsolete.
+ */
+export async function dropSupersededScoring(
+  db: D1Database,
+  profileId: string,
+  modelVersion: string,
+): Promise<number> {
+  const result = await db
+    .prepare(
+      `DELETE FROM gpu_jobs
+        WHERE type = 'score_batch'
+          AND status = 'queued'
+          AND json_extract(context_json, '$.profileId') = ?1
+          AND json_extract(context_json, '$.modelVersion') <> ?2`,
+    )
+    .bind(profileId, modelVersion)
+    .run()
+  return result.meta?.changes ?? 0
+}

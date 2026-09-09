@@ -3,8 +3,15 @@ import { JOB_LEASE_MINUTES } from '@ypr/domain'
 import worker from '../index.js'
 import type { Env } from '../env.js'
 import { appendRating } from '../db/ratings.js'
-import { claimNextJob, createJob, expireLeases, getJob, listJobs } from '../db/jobs.js'
-import { activateModel, createModelVersion } from '../db/models.js'
+import {
+  claimNextJob,
+  createJob,
+  dropSupersededScoring,
+  expireLeases,
+  getJob,
+  listJobs,
+} from '../db/jobs.js'
+import { activateModel, createModelVersion, listModelVersions } from '../db/models.js'
 import { engineDescription, engineMode, enginePulls } from '../services/runpod/engine.js'
 import { submitScoring } from '../services/model/score.js'
 import { submitTraining } from '../services/model/train.js'
@@ -325,5 +332,105 @@ describe('submitting in pull mode', () => {
     const job = await getJob(db, submission.jobId)
     expect(job?.status).toBe('queued')
     expect(job?.runpodJobId).toBeNull()
+  })
+})
+
+describe('activating a model', () => {
+  /**
+   * Six batches of a hundred ran overnight against a version training had already
+   * replaced, and the feed could not read a single one of the rows they produced. The
+   * queue outlives a retrain, so this is the ordinary case rather than a rare race.
+   */
+  it('discards queued batches that name the version being replaced', async () => {
+    const db = createTestDatabase()
+
+    for (const [id, version] of [
+      ['old-a', 'model-1'],
+      ['old-b', 'model-1'],
+      ['new-a', 'model-2'],
+    ] as const) {
+      await createJob(db, {
+        id,
+        type: 'score_batch',
+        payloadHash: `hash-${id}`,
+        context: { profileId: 'default', modelVersion: version, videoIds: ['youtube:v1'] },
+        now: 1_700_000_000_000,
+      })
+    }
+
+    const dropped = await dropSupersededScoring(db, 'default', 'model-2')
+
+    expect(dropped).toBe(2)
+    expect((await listJobs(db)).map((job) => job.id).sort()).toEqual(['new-a'])
+  })
+
+  it('leaves a batch that is already in flight alone', async () => {
+    const db = createTestDatabase()
+    await createJob(db, {
+      id: 'in-flight',
+      type: 'score_batch',
+      payloadHash: 'hash-in-flight',
+      context: { profileId: 'default', modelVersion: 'model-1', videoIds: ['youtube:v1'] },
+      now: 1_700_000_000_000,
+    })
+    // A runner holds a lease on it and will report a result; deleting the row underneath
+    // would turn that report into an error for work that is merely obsolete.
+    await claimNextJob(db, { now: 1_700_000_000_000, leaseMs: 60_000 })
+
+    expect(await dropSupersededScoring(db, 'default', 'model-2')).toBe(0)
+    expect(await getJob(db, 'in-flight')).not.toBeNull()
+  })
+
+  it('leaves another profile\'s queue alone', async () => {
+    const db = createTestDatabase()
+    await createJob(db, {
+      id: 'other-profile',
+      type: 'score_batch',
+      payloadHash: 'hash-other',
+      context: { profileId: 'someone-else', modelVersion: 'model-1', videoIds: ['youtube:v1'] },
+      now: 1_700_000_000_000,
+    })
+
+    expect(await dropSupersededScoring(db, 'default', 'model-2')).toBe(0)
+    expect(await getJob(db, 'other-profile')).not.toBeNull()
+  })
+
+  /**
+   * The count written when the job was queued describes what was asked for. The set is
+   * assembled when the job is taken, so an overnight wait means the model learned from
+   * more than the row claims — 32 recorded against 35 learned from, in the run that
+   * prompted this.
+   */
+  it('records what the engine trained on, not what was queued', async () => {
+    const db = createTestDatabase()
+    await createModelVersion(db, {
+      id: 'mv2',
+      profileId: 'default',
+      version: 2,
+      trainingEventCount: 32,
+      now: 1_700_000_000_000,
+    })
+
+    await activateModel(db, 'default', 'mv2', 1_700_000_100_000, undefined, 35)
+
+    const [model] = await listModelVersions(db, 'default')
+    expect(model.trainingEventCount).toBe(35)
+    expect(model.status).toBe('active')
+  })
+
+  it('keeps the queued count when the engine reports none', async () => {
+    const db = createTestDatabase()
+    await createModelVersion(db, {
+      id: 'mv3',
+      profileId: 'default',
+      version: 3,
+      trainingEventCount: 12,
+      now: 1_700_000_000_000,
+    })
+
+    await activateModel(db, 'default', 'mv3', 1_700_000_100_000)
+
+    const [model] = await listModelVersions(db, 'default')
+    expect(model.trainingEventCount).toBe(12)
   })
 })

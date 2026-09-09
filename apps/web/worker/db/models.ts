@@ -112,12 +112,24 @@ export async function setModelStatus(
  * instant at which the feed can see two active models or none — the property design
  * section 48 calls the atomic switch.
  */
+/**
+ * `trainedEventCount` is what the engine actually learned from, and it is written here
+ * because it is usually not what the row already says.
+ *
+ * The count stored when the job was queued describes what was asked for. A training job
+ * assembles its ratings when it is *taken*, so a job that waited for the machine to be
+ * free trains on anything rated in the meantime — a row read 32 while the model behind
+ * it had learned from 35. That is the right behaviour for the training set and the wrong
+ * number to leave in the ledger, since the ledger is what says how much evidence a
+ * model rests on.
+ */
 export async function activateModel(
   db: D1Database,
   profileId: string,
   id: string,
   now: EpochMillis,
   metadata?: ModelVersionMetadata,
+  trainedEventCount?: number,
 ): Promise<void> {
   await db.batch([
     db
@@ -129,10 +141,13 @@ export async function activateModel(
     db
       .prepare(
         `UPDATE model_versions
-         SET status = 'active', activated_at = ?3, metadata_json = COALESCE(?4, metadata_json)
+         SET status = 'active',
+             activated_at = ?3,
+             metadata_json = COALESCE(?4, metadata_json),
+             training_event_count = COALESCE(?5, training_event_count)
          WHERE id = ?2 AND profile_id = ?1`,
       )
-      .bind(profileId, id, now, metadata ? JSON.stringify(metadata) : null),
+      .bind(profileId, id, now, metadata ? JSON.stringify(metadata) : null, trainedEventCount ?? null),
   ])
 }
 

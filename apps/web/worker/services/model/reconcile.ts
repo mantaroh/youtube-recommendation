@@ -6,6 +6,7 @@ import {
 } from '@ypr/domain'
 import type { Env } from '../../env.js'
 import {
+  dropSupersededScoring,
   expireLeases,
   listRetryable,
   listUnfinished,
@@ -159,6 +160,8 @@ export async function failJob(env: Env, job: GpuJob, error: string, now: EpochMi
 export interface AppliedResult {
   scoresWritten: number
   activatedModel: string | null
+  /** Queued batches discarded because they targeted the version this run replaced. */
+  supersededScoringDropped?: number
 }
 
 export async function applyResult(
@@ -189,13 +192,26 @@ export async function applyResult(
     if (!modelVersionId || !profileId) throw new Error('train job has no model version in its context')
 
     // The switch to the new model happens here, in one statement pair, and only once
-    // the GPU has confirmed the model is on disk (design section 48).
-    await activateModel(env.DB, profileId, modelVersionId, now, {
-      modelPath: parsed.data.modelPath,
-      trainedSeconds: parsed.data.trainedSeconds,
-      ...(parsed.data.accuracy ? { accuracy: parsed.data.accuracy } : {}),
-    })
-    return { scoresWritten: 0, activatedModel: parsed.data.modelVersion }
+    // the engine has confirmed the model is on disk (design section 48).
+    await activateModel(
+      env.DB,
+      profileId,
+      modelVersionId,
+      now,
+      {
+        modelPath: parsed.data.modelPath,
+        trainedSeconds: parsed.data.trainedSeconds,
+        ...(parsed.data.accuracy ? { accuracy: parsed.data.accuracy } : {}),
+      },
+      parsed.data.trainedEventCount,
+    )
+
+    // Anything still queued for the version this one replaced would score into a column
+    // the feed no longer reads. Dropped rather than left to run, because a scoring queue
+    // is hours long and a retrain is what fires while it is draining.
+    const dropped = await dropSupersededScoring(env.DB, profileId, parsed.data.modelVersion)
+
+    return { scoresWritten: 0, activatedModel: parsed.data.modelVersion, supersededScoringDropped: dropped }
   }
 
   // `embed_batch` and `describe_batch` have no consumer in V1: nothing in the ranking
