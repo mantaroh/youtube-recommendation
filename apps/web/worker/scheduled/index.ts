@@ -1,7 +1,7 @@
 import type { EpochMillis } from '@ypr/domain'
 import { DEFAULT_PROFILE_ID, DISCOVERY_SEARCH_BUDGET } from '@ypr/domain'
 import type { Env } from '../env.js'
-import { runDiscovery, syncSubscriptions } from '../services/discovery/index.js'
+import { backfillThumbnails, runDiscovery, syncSubscriptions } from '../services/discovery/index.js'
 import { reconcileJobs } from '../services/model/reconcile.js'
 import { submitScoring } from '../services/model/score.js'
 import { NotEnoughRatings, submitTraining } from '../services/model/train.js'
@@ -95,6 +95,12 @@ export async function runScheduled(env: Env, now: EpochMillis): Promise<Schedule
       summaries.push({ task: 'retrain', profileId, detail: await maybeRetrain(env, profileId, now) })
       summaries.push({ task: 'backup', profileId, detail: await backupToR2(env, profileId, now) })
     }
+  }
+
+  // Once, not per profile: the catalog is shared, and a row missing its thumbnail is
+  // missing it for everyone.
+  if (hour === 12) {
+    summaries.push({ task: 'thumbnails', detail: await backfillThumbnails(env, now) })
   }
 
   // Once, not per profile: the job ledger is shared, and reconciliation works on rows

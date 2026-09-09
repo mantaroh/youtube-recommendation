@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { discoveryRunRequestSchema, SEARCH_QUOTA_PER_DAY } from '@ypr/domain'
 import type { AppBindings } from './types.js'
-import { runDiscovery, syncSubscriptions } from '../services/discovery/index.js'
+import { backfillThumbnails, runDiscovery, syncSubscriptions } from '../services/discovery/index.js'
 import { usedToday } from '../db/quota.js'
 import { listChannels } from '../db/videos.js'
 
@@ -34,6 +34,18 @@ discoveryRoutes.post('/discovery/run', async (context) => {
 discoveryRoutes.post('/discovery/subscriptions', async (context) => {
   const app = context.get('app')
   return context.json(await syncSubscriptions(app.env, app.profileId, app.now))
+})
+
+/**
+ * Repair catalog rows that are missing metadata.
+ *
+ * On the schedule as well, once a day. The button exists because the schedule takes
+ * eleven days to work through what is missing, and someone looking at a column of grey
+ * rectangles should not have to wait for it.
+ */
+discoveryRoutes.post('/discovery/thumbnails', async (context) => {
+  const app = context.get('app')
+  return context.json(await backfillThumbnails(app.env, app.now))
 })
 
 discoveryRoutes.get('/channels', async (context) => {

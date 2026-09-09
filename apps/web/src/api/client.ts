@@ -116,6 +116,11 @@ export interface YouTubeStatus {
 export const api = {
   status: () => request<StatusResponse>('/status'),
 
+  backfillThumbnails: () =>
+    request<{ examined: number; refreshed: number; errors: string[] }>('/discovery/thumbnails', {
+      method: 'POST',
+    }),
+
   feed: (options: { lane?: Lane; limit?: number } = {}) => {
     const params = new URLSearchParams()
     if (options.lane) params.set('lane', options.lane)

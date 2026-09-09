@@ -3,6 +3,7 @@ import {
   DISCOVERY_INTEREST_CLUSTERS,
   DISCOVERY_QUERIES_PER_INTEREST,
   DISCOVERY_SEARCH_BUDGET,
+  THUMBNAIL_BACKFILL_PER_RUN,
 } from '@ypr/domain'
 import type { Env } from '../../env.js'
 import { splitList } from '../../env.js'
@@ -15,6 +16,7 @@ import {
   setSubscribed,
   upsertChannels,
   upsertVideos,
+  videosMissingThumbnails,
 } from '../../db/videos.js'
 import { YouTubeClient, YouTubeError } from '../youtube/client.js'
 import { youtubeCredentials } from '../youtube/credentials.js'
@@ -425,3 +427,59 @@ function describe(error: unknown): string {
 }
 
 export { splitList }
+
+/**
+ * Fill in metadata the catalog is missing, a page at a time.
+ *
+ * Migration 0002 brought the catalog over from the first version with `thumbnail_url`
+ * hardcoded to null, and nothing re-reads a video it already holds, so two thousand rows
+ * had no path back to a picture. It became worth fixing when the watch page grew a
+ * column of thumbnails beside the player: judging "not this one" from a grey rectangle
+ * is not judging anything.
+ *
+ * A page at a time, and on the schedule, rather than a one-off script. A script leaves
+ * the same gap open for the next migration to fall into; a bounded pass that runs anyway
+ * closes it and keeps it closed. Two hundred is four quota units against a daily ten
+ * thousand — small enough to run unattended, bounded enough that a catalog of a hundred
+ * thousand does not turn one cron tick into two thousand calls.
+ *
+ * Nothing here belongs to a profile. Re-reading a video already stored says nothing
+ * about whose feed it belongs in, so no candidacy is written: the repair must not hand
+ * every mended row to whichever profile happened to trigger it.
+ */
+export async function backfillThumbnails(
+  env: Env,
+  now: EpochMillis,
+  options: { limit?: number; fetchImpl?: typeof fetch } = {},
+): Promise<{ examined: number; refreshed: number; errors: string[] }> {
+  const limit = Math.max(1, Math.min(options.limit ?? THUMBNAIL_BACKFILL_PER_RUN, 500))
+  const externalIds = await videosMissingThumbnails(env.DB, limit)
+  if (externalIds.length === 0) return { examined: 0, refreshed: 0, errors: [] }
+
+  // The key is enough: this reads public metadata for videos already stored, and sending
+  // the account token would attach the user to a request that had no need of it.
+  const credentials = await youtubeCredentials(env, now, options.fetchImpl)
+  if (!credentials.apiKey && !credentials.accessToken) {
+    return { examined: externalIds.length, refreshed: 0, errors: ['no YouTube credentials configured'] }
+  }
+
+  const client = new YouTubeClient({
+    ...credentials,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  })
+
+  try {
+    const items = await client.listVideos(externalIds)
+    await recordUsage(env.DB, 'list', client.tally.list, now)
+    if (items.length === 0) {
+      // Every one of them has been deleted or made private. Reported rather than
+      // retried: the next run asks for the same page and would loop on it forever.
+      return { examined: externalIds.length, refreshed: 0, errors: ['none of the videos are still available'] }
+    }
+    await upsertChannels(env.DB, 'youtube', channelsFromItems(items))
+    const refreshed = await upsertVideos(env.DB, 'youtube', items, { now, profileId: null })
+    return { examined: externalIds.length, refreshed, errors: [] }
+  } catch (error) {
+    return { examined: externalIds.length, refreshed: 0, errors: [describe(error)] }
+  }
+}

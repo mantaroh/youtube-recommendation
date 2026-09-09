@@ -137,3 +137,13 @@ export const MUTE_DAYS = 30
  * a run that was going to succeed. On a queue this size the first is barely a cost.
  */
 export const JOB_LEASE_MINUTES = 180
+
+/**
+ * Videos one metadata-repair pass re-reads.
+ *
+ * `videos.list` takes fifty ids for one unit, so two hundred is four units against a
+ * daily ten thousand — small enough to run unattended. The cap exists at all because a
+ * repair with no bound is a repair that turns one cron tick into two thousand calls once
+ * the catalog is large.
+ */
+export const THUMBNAIL_BACKFILL_PER_RUN = 200

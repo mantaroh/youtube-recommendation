@@ -59,8 +59,13 @@ export interface UpsertVideoOptions {
    * Whose discovery found these. The row itself is shared — the catalog holds one copy
    * of a video however many profiles reach it — but being *in* the catalog is not the
    * same as being a candidate for a profile's feed (migration 0010).
+   *
+   * Null for work that repairs the catalog rather than discovering anything: re-reading
+   * a video already stored to fill in a column tells us nothing new about whose feed it
+   * belongs in, and writing a candidacy there would quietly hand every mended row to
+   * whichever profile happened to run the repair.
    */
-  profileId: string
+  profileId: string | null
   /** Recorded in metadata so quota spend can be attributed to a lane afterwards. */
   discoveredBy?: VideoMetadata['discoveredBy']
   discoveryQuery?: string
@@ -154,12 +159,14 @@ export async function upsertVideos(
   await db.batch(statements)
 
   // Written after the rows exist, because the candidacy has a foreign key to them.
-  await addCandidates(
-    db,
-    options.profileId,
-    [...unique.keys()].map((externalId) => itemKey({ source, externalId })),
-    options.now,
-  )
+  if (options.profileId !== null) {
+    await addCandidates(
+      db,
+      options.profileId,
+      [...unique.keys()].map((externalId) => itemKey({ source, externalId })),
+      options.now,
+    )
+  }
 
   return unique.size
 }
@@ -512,4 +519,27 @@ export async function listCandidates(
     .all<JoinedRow>()
 
   return (results ?? []).map(toJoined)
+}
+
+/**
+ * Videos stored without a thumbnail, oldest first.
+ *
+ * Migration 0002 carried the catalog over from the first version with the column
+ * hardcoded to null, and nothing re-reads a video it already has, so those rows had no
+ * way to heal. Rows written since do carry one — the count was 1706 against 2188 — which
+ * is why this looks for the gap rather than rewriting everything.
+ *
+ * Oldest first so that repeated runs make progress instead of returning the same page.
+ */
+export async function videosMissingThumbnails(db: D1Database, limit: number): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT external_id FROM videos
+        WHERE thumbnail_url IS NULL
+        ORDER BY discovered_at ASC
+        LIMIT ?1`,
+    )
+    .bind(Math.max(1, limit))
+    .all<{ external_id: string }>()
+  return (results ?? []).map((row) => row.external_id)
 }

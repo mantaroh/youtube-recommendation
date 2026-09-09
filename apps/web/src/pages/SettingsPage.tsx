@@ -161,7 +161,15 @@ export function SettingsPage() {
           <button type="button" disabled={busy} onClick={() => void run('search pass', () => api.runDiscovery({ lanes: ['related', 'explore'] }))}>
             Search for candidates
           </button>
+          <button type="button" disabled={busy} onClick={() => void run('thumbnails', api.backfillThumbnails)}>
+            Fetch missing thumbnails
+          </button>
         </div>
+        <p className="panel-note">
+          The catalog carried over from the first version without thumbnails, and nothing
+          re-reads a video it already has. A pass fills in two hundred of them for four of
+          the ten thousand daily quota units; the schedule does one a day on its own.
+        </p>
         <p className="panel-note">
           Searching costs one of a hundred daily calls per query, so a run spends at most thirty and
           leaves the rest for manual searching.
