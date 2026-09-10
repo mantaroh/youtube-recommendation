@@ -11,6 +11,7 @@ import {
   setSubscribed,
   upsertChannels,
 } from '../db/videos.js'
+import { unscoredVideoIds } from '../db/models.js'
 import { buildFeed } from '../services/recommendation/feed.js'
 import { createTestDatabase } from './d1.js'
 import { seedVideo } from './fixtures.js'
@@ -365,5 +366,56 @@ describe('what the upload walk attributes', () => {
     await db.prepare('DELETE FROM profile_candidates').run()
 
     expect(await addSubscriptionCandidates(db, ids, NOW)).toBe(250)
+  })
+})
+
+describe('what a profile is asked to score', () => {
+  /**
+   * The candidate pool was split per profile and the scoring backlog was not. It read
+   * `videos` directly, so one account's nightly hours went partly to videos only the
+   * other account would ever be shown — two hundred and twenty-eight of nine hundred and
+   * nineteen, at about half a minute each.
+   *
+   * Nothing leaked: a score is written under the profile that asked for it. The work
+   * went to the wrong feed, which is a different kind of wrong and just as invisible.
+   */
+  it('is its own candidates, not the whole catalog', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:mine', publishedAt: NOW })
+    await seedVideo(db, { id: 'youtube:theirs', profileId: 'private', publishedAt: NOW })
+
+    const mine = await unscoredVideoIds(db, 'default', 'model-1', {
+      publishedAfter: NOW - 86_400_000,
+      limit: 50,
+    })
+    expect(mine).toEqual(['youtube:mine'])
+
+    const theirs = await unscoredVideoIds(db, 'private', 'model-1', {
+      publishedAfter: NOW - 86_400_000,
+      limit: 50,
+    })
+    expect(theirs).toEqual(['youtube:theirs'])
+  })
+
+  it('leaves out what is too short to be offered', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:long', publishedAt: NOW, durationSeconds: 600 })
+
+    // Ingest refuses a short outright, so one is written past it to stand for the rows
+    // already stored — the rated ones, which keep their rows.
+    await db
+      .prepare(
+        `INSERT INTO videos (id, source, external_id, title, duration_seconds, discovered_at, published_at)
+         VALUES ('youtube:short', 'youtube', 'short', 'Old short', 45, ?1, ?1)`,
+      )
+      .bind(NOW)
+      .run()
+    await addCandidates(db, 'default', ['youtube:short'], NOW)
+
+    const ids = await unscoredVideoIds(db, 'default', 'model-1', {
+      publishedAfter: NOW - 86_400_000,
+      limit: 50,
+    })
+    expect(ids).toEqual(['youtube:long'])
   })
 })

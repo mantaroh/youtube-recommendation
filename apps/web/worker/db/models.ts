@@ -284,7 +284,20 @@ export async function unscoredVideoIds(
          AND COALESCE(v.published_at, v.discovered_at) >= ?3
          -- Not scored because never offered. Three thousand of the three thousand
          -- eight hundred waiting were shorts, and scoring one costs about half a minute.
-         AND COALESCE(v.duration_seconds, 180) > 180
+         --
+         -- An unknown duration counts as long, matching listCandidates: a video that
+         -- would be offered has to be scorable, or the feed shows it with no prediction
+         -- behind it forever.
+         AND COALESCE(v.duration_seconds, 181) > 180
+         -- This profile's candidates, not the catalog's. Missed when the pool was split
+         -- per profile: scoring read the videos table and so spent one account's nights on the
+         -- other's videos — two hundred and twenty-eight of nine hundred and nineteen,
+         -- at half a minute each. The score is written under the right profile either
+         -- way, so nothing leaked; the work simply went to the wrong feed.
+         AND EXISTS (
+           SELECT 1 FROM profile_candidates pc
+            WHERE pc.video_id = v.id AND pc.profile_id = ?1
+         )
        ORDER BY COALESCE(v.published_at, v.discovered_at) DESC
        LIMIT ?4`,
     )
