@@ -1,5 +1,6 @@
 import type { Channel, EpochMillis, Source, SourceChannel, SourceItem, Video, VideoMetadata } from '@ypr/domain'
 import { itemKey } from '@ypr/domain'
+import { SHORT_MAX_SECONDS } from '@ypr/domain'
 
 /**
  * Channel and video rows.
@@ -113,8 +114,17 @@ export async function upsertVideos(
   // The same video can arrive twice in one batch when two searches overlap. D1 runs a
   // batch as one transaction, and two conflicting upserts of the same key inside it
   // are wasted work, so collapse them first.
+  //
+  // Shorts are dropped here rather than filtered later, because this is the one place
+  // everything entering the catalog passes through. Eighty-two per cent of what
+  // discovery found was three minutes or less, and none of it was ever going to be
+  // offered — keeping it cost the storage, and scoring it cost the hours.
   const unique = new Map<string, SourceItem>()
-  for (const item of items) unique.set(item.externalId, item)
+  for (const item of items) {
+    if (item.durationSeconds !== null && item.durationSeconds <= SHORT_MAX_SECONDS) continue
+    unique.set(item.externalId, item)
+  }
+  if (unique.size === 0) return 0
 
   const statements = [...unique.values()].map((item) => {
     const metadata: VideoMetadata = {
@@ -499,6 +509,9 @@ export async function listCandidates(
     // shared so a video is stored once; the feed is not, so a video another profile's
     // discovery found is not offered here.
     'EXISTS (SELECT 1 FROM profile_candidates pc WHERE pc.video_id = v.id AND pc.profile_id = ?1)',
+    // Nothing shorter is part of this system. Ingest stops storing them, and this keeps
+    // the ones already stored — the rated ones, which keep their rows — out of the feed.
+    `COALESCE(v.duration_seconds, ${SHORT_MAX_SECONDS + 1}) > ${SHORT_MAX_SECONDS}`,
   ]
 
   if (query.subscribed !== undefined) {

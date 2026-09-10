@@ -282,6 +282,9 @@ export async function unscoredVideoIds(
          ON s.video_id = v.id AND s.profile_id = ?1 AND s.model_version = ?2
        WHERE s.video_id IS NULL
          AND COALESCE(v.published_at, v.discovered_at) >= ?3
+         -- Not scored because never offered. Three thousand of the three thousand
+         -- eight hundred waiting were shorts, and scoring one costs about half a minute.
+         AND COALESCE(v.duration_seconds, 180) > 180
        ORDER BY COALESCE(v.published_at, v.discovered_at) DESC
        LIMIT ?4`,
     )

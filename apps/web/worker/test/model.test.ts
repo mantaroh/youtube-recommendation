@@ -165,14 +165,14 @@ describe('videoText', () => {
    * of it could be learned, because the text carried no clue that a video was short.
    */
   it('tells the model how long the video is', () => {
-    const text = videoText(sampleVideo({ durationSeconds: 45 }), null)
-    expect(text).toContain('Length: 45 seconds (a short)')
+    const text = videoText(sampleVideo({ durationSeconds: 480 }), null)
+    expect(text).toContain('Length: 8 minutes')
   })
 
   it('names the band rather than only the number', () => {
-    // The embedder reads text: "a short" means something in its vocabulary that 45
-    // does not, and the band is what the preference is actually about.
-    expect(videoText(sampleVideo({ durationSeconds: 150 }), null)).toContain('(a short)')
+    // The embedder reads text: "long" means something in its vocabulary that 1200 does
+    // not, and the band is what the preference is about. There is no short band, because
+    // nothing that short is stored.
     expect(videoText(sampleVideo({ durationSeconds: 1_200 }), null)).toContain('(long)')
     expect(videoText(sampleVideo({ durationSeconds: 7_200 }), null)).toContain('(very long)')
     expect(videoText(sampleVideo({ durationSeconds: 400 }), null)).not.toContain('(')
@@ -185,7 +185,7 @@ describe('videoText', () => {
 
   it('puts the length before the description, which is the part that gets cut', () => {
     const text = videoText(
-      sampleVideo({ durationSeconds: 30, description: 'x'.repeat(5_000) }),
+      sampleVideo({ durationSeconds: 900, description: 'x'.repeat(5_000) }),
       null,
     )
     expect(text.indexOf('Length:')).toBeLessThan(text.indexOf('xxxx'))

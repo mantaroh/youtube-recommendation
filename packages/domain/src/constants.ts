@@ -18,20 +18,6 @@ export const DEFAULT_WEIGHTS: RankingWeights = {
   explorationBonus: 0.6,
   seenPenalty: 2.0,
   mutedInterestPenalty: 6.0,
-  /**
-   * Shorts, charged the same as being shown twice already.
-   *
-   * Not a guess. On this installation the ratings split at three minutes — a mean of
-   * 1.2 below it over twenty-eight ratings against 3.3 above over twenty-eight — while
-   * 81% of the catalog sits below it. Without something at the ranking layer, four
-   * videos in five are ones the reader has spent a month saying no to.
-   *
-   * 2.0 is worth roughly three rating points of prediction at the scale the other
-   * weights use, so a short video has to be predicted well to outrank a long one that
-   * is merely average. It does not remove them: a short video the model is confident
-   * about still appears, which is the point of a weight rather than a filter.
-   */
-  shortPenalty: 2.0,
 }
 
 /** Initial lane mix (design section 17): 50 / 30 / 20. */
@@ -55,8 +41,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   /** No more than 3 videos from one channel per 20 shown (design section 35). */
   maxPerChannel: 3,
   freshnessHalfLifeDays: 7,
-  /** YouTube's own line for a Short, and where this installation's ratings divide. */
-  shortThresholdSeconds: 180,
   retrainAfterRatings: 20,
   retrainAfterDays: 7,
 }
@@ -115,6 +99,24 @@ export const SCORE_BATCH_SIZE = 100
  * model as suspect until something has checked that it discriminates.
  */
 export const TRAIN_TIME_BUDGET_SECONDS = 900
+
+/**
+ * Videos this long or shorter are not part of this system.
+ *
+ * It began as a weight — shorts demoted, not removed — and the ratings said that was
+ * too gentle. Twenty-eight ratings below three minutes averaged 1.2 against 3.3 above,
+ * and eighty-two per cent of everything discovered fell below the line. A penalty still
+ * spends the quota to fetch them, the storage to keep them and the hours to score them,
+ * for a pile of candidates that exists to be pushed down.
+ *
+ * So it is a rule now, and a rule about the whole system rather than one reader's
+ * preference: nothing shorter is stored, offered or scored. Three minutes is YouTube's
+ * own line for a Short, inclusive — a video of exactly 3:00 is one.
+ *
+ * A video already rated keeps its row, because the rating is the one thing here that
+ * cannot be rebuilt. It is simply never a candidate again.
+ */
+export const SHORT_MAX_SECONDS = 180
 
 /** A failed GPU job is resubmitted at most this many times (design section 48). */
 export const MAX_JOB_ATTEMPTS = 3

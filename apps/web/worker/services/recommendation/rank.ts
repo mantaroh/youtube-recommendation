@@ -90,23 +90,6 @@ export function scoreCandidate(candidate: Candidate, context: ScoringContext): S
   const shown = context.seen.get(candidate.video.id) ?? 0
   const seenPenalty = shown === 0 ? 0 : weights.seenPenalty * Math.min(1, shown / 3)
 
-  /**
-   * Length, which the model cannot see.
-   *
-   * What goes to the engine is the title, the channel, the tags and the description —
-   * so a video being forty-five seconds long is not something it can learn from,
-   * however many times the reader says no to one. On this installation that was
-   * twenty-eight ratings averaging 1.2 against 3.3 for everything longer, teaching the
-   * model nothing, while four videos in five in the catalog were short.
-   *
-   * A duration of null is not treated as short. An unknown length is missing evidence,
-   * and charging a penalty for it would demote videos for not having been fetched
-   * properly.
-   */
-  const duration = candidate.video.durationSeconds
-  const isShort = duration !== null && duration <= settings.shortThresholdSeconds
-  const shortPenalty = isShort ? weights.shortPenalty : 0
-
   const total =
     preference +
     subscriptionBonus +
@@ -114,8 +97,7 @@ export function scoreCandidate(candidate: Candidate, context: ScoringContext): S
     explicitInterestBonus +
     explorationBonus -
     seenPenalty -
-    mutedInterestPenalty -
-    shortPenalty
+    mutedInterestPenalty
 
   const breakdown: ScoreBreakdown = {
     preference,
@@ -125,7 +107,6 @@ export function scoreCandidate(candidate: Candidate, context: ScoringContext): S
     explorationBonus,
     seenPenalty,
     mutedInterestPenalty,
-    shortPenalty,
     total,
   }
 

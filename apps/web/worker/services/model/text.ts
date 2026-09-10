@@ -51,8 +51,9 @@ export function videoText(video: Video, channel: Channel | null): string {
  * band matters more here than the exact figure.
  */
 function describeLength(seconds: number): string {
-  if (seconds <= 60) return `${seconds} seconds (a short)`
-  if (seconds <= 180) return `${Math.round(seconds / 60)} minutes (a short)`
+  // No "short" band any more: nothing that short is stored (SHORT_MAX_SECONDS). What is
+  // left to tell the model is the difference between a ten-minute video and an hour of
+  // one, which the ratings also separate — 3.5 under ten minutes, 3.25 over thirty.
   if (seconds <= 600) return `${Math.round(seconds / 60)} minutes`
   if (seconds <= 3600) return `${Math.round(seconds / 60)} minutes (long)`
   return `${(seconds / 3600).toFixed(1)} hours (very long)`

@@ -18,6 +18,8 @@ export interface SeedVideoOptions {
   subscribed?: boolean
   profileId?: string
   publishedAt?: number
+  /** Default is comfortably over `SHORT_MAX_SECONDS`, which ingest refuses. */
+  durationSeconds?: number
   viewCount?: number
   tags?: string[]
   description?: string
@@ -55,7 +57,7 @@ export async function seedVideo(db: D1Database, options: SeedVideoOptions): Prom
     channelTitle: options.channelTitle ?? channelExternalId,
     thumbnailUrl: null,
     publishedAt: new Date(options.publishedAt ?? now).toISOString(),
-    durationSeconds: 600,
+    durationSeconds: options.durationSeconds ?? 600,
     viewCount: options.viewCount ?? 1_000,
     tags: options.tags ?? [],
     officialCategoryId: '28',

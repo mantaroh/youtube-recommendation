@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { SHORT_MAX_SECONDS } from '@ypr/domain'
 import { DEFAULT_LANE_MIX } from '@ypr/domain'
 import { buildFeed, diversify, laneQuotas } from '../services/recommendation/feed.js'
 import { appendRating, recordImpressions } from '../db/ratings.js'
@@ -193,5 +194,66 @@ describe('buildFeed', () => {
 
     const feed = await buildFeed(db, { profileId: 'default', now: NOW, lane: 'subscription' })
     expect(feed.items.map((entry) => entry.video.id)).toEqual(['youtube:sub'])
+  })
+})
+
+describe('videos too short for this system', () => {
+  /**
+   * It began as a weight and the ratings said that was too gentle: twenty-eight ratings
+   * below three minutes averaged 1.2 against 3.3 above, while eighty-two per cent of
+   * everything discovered fell below the line. A penalty still pays to fetch, store and
+   * score a pile of candidates that exists to be pushed down.
+   *
+   * So nothing shorter is stored, offered or scored. What is asserted here is absence.
+   */
+  it('are not offered, however new or popular', async () => {
+    const db = createTestDatabase()
+    await seedVideo(db, {
+      id: 'youtube:short',
+      durationSeconds: SHORT_MAX_SECONDS,
+      viewCount: 10_000_000,
+      publishedAt: NOW,
+    })
+    await seedVideo(db, { id: 'youtube:long', durationSeconds: SHORT_MAX_SECONDS + 1, publishedAt: NOW })
+
+    const feed = await buildFeed(db, { profileId: 'default', now: NOW })
+
+    // Three minutes exactly is a Short by YouTube's own line, and by this one.
+    expect(feed.items.map((item) => item.video.id)).toEqual(['youtube:long'])
+  })
+
+  it('are not stored in the first place', async () => {
+    const db = createTestDatabase()
+    await seedVideo(db, { id: 'youtube:short', durationSeconds: 60 })
+
+    const row = await db.prepare('SELECT COUNT(*) AS n FROM videos').first<{ n: number }>()
+    expect(row?.n).toBe(0)
+  })
+
+  it('keep their row when they have been rated', async () => {
+    // The rating is the one thing here that cannot be rebuilt: a model can be retrained
+    // from ratings, and ratings cannot be recovered from a model. So a rated short keeps
+    // its row and simply stops being a candidate.
+    const db = createTestDatabase()
+    await db
+      .prepare(
+        `INSERT INTO videos (id, source, external_id, title, duration_seconds, discovered_at)
+         VALUES ('youtube:rated', 'youtube', 'rated', 'An old favourite', 45, ?1)`,
+      )
+      .bind(NOW)
+      .run()
+    await appendRating(db, {
+      id: 'e1',
+      profileId: 'default',
+      videoId: 'youtube:rated',
+      rating: 5,
+      createdAt: NOW,
+    })
+
+    const feed = await buildFeed(db, { profileId: 'default', now: NOW })
+    expect(feed.items).toHaveLength(0)
+
+    const kept = await db.prepare('SELECT COUNT(*) AS n FROM rating_events').first<{ n: number }>()
+    expect(kept?.n).toBe(1)
   })
 })
