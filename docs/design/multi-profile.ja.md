@@ -94,6 +94,50 @@ CREATE TABLE profile_subscriptions (
 残り3097本を `default` に割り当てた。**`private` はまだ探索を1度も走らせていないので、
 これは推測ではなく事実。**
 
+## 巡回の帰属（2026-09-10、3度目の差し戻し）
+
+候補プールを分けたあとも漏れていた。`default` の候補に、
+**`private` だけが購読するチャンネルの動画が195本**入っていた。逆方向も同様。
+
+原因は帰属先。`listChannelsToRefresh` は全プロファイルの購読の和集合を歩く。
+同じチャンネルを2回取らないためで、これは正しい。
+**誤っていたのは、取得した動画を「巡回を走らせたプロファイル」の候補にしていたこと。**
+
+```ts
+summary.stored = await store(env, profileId, items, 'subscription')
+//                                ↑ 走らせた側。購読者ではない
+```
+
+`addSubscriptionCandidates` で、**チャンネルを購読しているプロファイル全員**に記録するよう変えた。
+巡回は和集合のまま。帰属さえ正しければ漏れないので、クォータの節約を捨てる理由がない。
+
+### 同じ見落としを3回した
+
+購読（0008）、候補プール（0010）、そして帰属。
+いずれも **「テーブルに `profile_id` があるか」だけを確認して、
+「その値がどう決まるか」を追わなかった。** 3度目は列があり、入れる値が誤っていた。
+
+そこで、事例ではなく**性質**を検証するテストを置いた。
+
+> あるプロファイルの候補に、他プロファイルだけが購読するチャンネルの動画が含まれない
+
+### 本番の監査
+
+同じ条件を本番で数えられる。探索まわりを変えたら実行する。
+
+```sql
+SELECT pc.profile_id, COUNT(*) AS leaked
+  FROM profile_candidates pc
+  JOIN videos v ON v.id = pc.video_id
+ WHERE EXISTS (SELECT 1 FROM profile_subscriptions s
+                WHERE s.channel_id = v.channel_id AND s.profile_id <> pc.profile_id)
+   AND NOT EXISTS (SELECT 1 FROM profile_subscriptions t
+                    WHERE t.channel_id = v.channel_id AND t.profile_id = pc.profile_id)
+ GROUP BY pc.profile_id;
+```
+
+**0 でなければ漏れている。**
+
 ### 検証
 
 `worker/test/profile-isolation.test.ts` を追加した。
@@ -201,4 +245,4 @@ const redirectUri = new URL(request.url).origin + '/api/auth/youtube/callback'
 ## ターン数
 
 - 予定: 設計 1 / 実装 2
-- 実績: 設計 1 / 実装 3（購読と候補プール、2度の分離漏れによる差し戻しを含む）
+- 実績: 設計 1 / 実装 4（購読・候補プール・巡回の帰属、3度の分離漏れによる差し戻しを含む）

@@ -552,3 +552,43 @@ export async function videosMissingThumbnails(db: D1Database, limit: number): Pr
     .all<{ external_id: string }>()
   return (results ?? []).map((row) => row.external_id)
 }
+
+/**
+ * Records videos as candidates for whoever subscribes to the channel they came from.
+ *
+ * The upload walk reads the union of every profile's subscriptions, so that a channel
+ * two profiles follow costs one fetch instead of two. What it must not do is hand the
+ * result to whichever profile happened to run it: that put a hundred and ninety-five
+ * videos from channels only the second account followed into the first account's feed,
+ * and the same in reverse.
+ *
+ * Derived from the subscription rather than passed in, because the caller does not know
+ * — it asked for a batch of channels and got back a pile of videos. The join is the only
+ * place the answer exists.
+ */
+export async function addSubscriptionCandidates(
+  db: D1Database,
+  videoIds: string[],
+  now: EpochMillis,
+): Promise<number> {
+  if (videoIds.length === 0) return 0
+  // One bound parameter goes to `now`, so ninety-nine ids fit inside D1's hundred.
+  const CHUNK = 99
+  let written = 0
+  for (let offset = 0; offset < videoIds.length; offset += CHUNK) {
+    const chunk = videoIds.slice(offset, offset + CHUNK)
+    const placeholders = chunk.map((_, index) => `?${index + 2}`).join(', ')
+    const result = await db
+      .prepare(
+        `INSERT OR IGNORE INTO profile_candidates (profile_id, video_id, discovered_at)
+         SELECT s.profile_id, v.id, ?1
+           FROM videos v
+           JOIN profile_subscriptions s ON s.channel_id = v.channel_id
+          WHERE v.id IN (${placeholders})`,
+      )
+      .bind(now, ...chunk)
+      .run()
+    written += result.meta?.changes ?? 0
+  }
+  return written
+}

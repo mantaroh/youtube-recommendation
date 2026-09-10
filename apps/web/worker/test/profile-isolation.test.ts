@@ -3,6 +3,7 @@ import { SCORE_BATCH_SIZE } from '@ypr/domain'
 import { ensureProfile } from '../db/settings.js'
 import {
   addCandidates,
+  addSubscriptionCandidates,
   listChannels,
   loadVideosWithChannels,
   listChannelsToRefresh,
@@ -270,5 +271,99 @@ describe('loading a batch of videos', () => {
     }
 
     expect(await loadVideosWithChannels(db, 'default', ids)).toHaveLength(SCORE_BATCH_SIZE)
+  })
+})
+
+describe('what the upload walk attributes', () => {
+  /**
+   * The third leak of the same kind, and the reason this describe block asserts a
+   * property rather than a case.
+   *
+   * The walk deliberately reads the union of every profile's subscriptions, so one
+   * channel two profiles follow costs one fetch. The mistake was filing the result under
+   * whoever ran the pass: a hundred and ninety-five videos from channels only the second
+   * account followed ended up in the first account's feed, and the same in reverse.
+   */
+  it('files a video against the profiles that subscribe to its channel', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:theirs', channelExternalId: 'UCtheirs' })
+    await setSubscribed(db, 'private', ['youtube:UCtheirs'], NOW)
+    // Written with no candidacy, exactly as the walk stores them.
+    await db.prepare('DELETE FROM profile_candidates').run()
+
+    await addSubscriptionCandidates(db, ['youtube:theirs'], NOW)
+
+    const rows = await db
+      .prepare('SELECT profile_id FROM profile_candidates WHERE video_id = ?1')
+      .bind('youtube:theirs')
+      .all<{ profile_id: string }>()
+    expect(rows.results?.map((row) => row.profile_id)).toEqual(['private'])
+  })
+
+  it('files it against both when both subscribe', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:shared', channelExternalId: 'UCboth' })
+    await setSubscribed(db, 'default', ['youtube:UCboth'], NOW)
+    await setSubscribed(db, 'private', ['youtube:UCboth'], NOW)
+    await db.prepare('DELETE FROM profile_candidates').run()
+
+    await addSubscriptionCandidates(db, ['youtube:shared'], NOW)
+
+    const rows = await db
+      .prepare('SELECT profile_id FROM profile_candidates WHERE video_id = ?1 ORDER BY profile_id')
+      .bind('youtube:shared')
+      .all<{ profile_id: string }>()
+    expect(rows.results?.map((row) => row.profile_id)).toEqual(['default', 'private'])
+  })
+
+  it('files it against nobody when nobody subscribes', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:orphan', channelExternalId: 'UCnobody' })
+    await db.prepare('DELETE FROM profile_candidates').run()
+
+    expect(await addSubscriptionCandidates(db, ['youtube:orphan'], NOW)).toBe(0)
+  })
+
+  /**
+   * The property, not the case. Whatever the walk does, no profile should end up with a
+   * candidate from a channel only somebody else follows — which is the shape all three
+   * leaks took and the thing to check after any change to discovery.
+   */
+  it('leaves no profile holding a candidate from a channel only another follows', async () => {
+    const db = await twoProfiles()
+    await seedVideo(db, { id: 'youtube:a', channelExternalId: 'UCmine' })
+    await seedVideo(db, { id: 'youtube:b', channelExternalId: 'UCtheirs' })
+    await setSubscribed(db, 'default', ['youtube:UCmine'], NOW)
+    await setSubscribed(db, 'private', ['youtube:UCtheirs'], NOW)
+    await db.prepare('DELETE FROM profile_candidates').run()
+
+    await addSubscriptionCandidates(db, ['youtube:a', 'youtube:b'], NOW)
+
+    const leaked = await db
+      .prepare(
+        `SELECT COUNT(*) AS n
+           FROM profile_candidates pc
+           JOIN videos v ON v.id = pc.video_id
+          WHERE EXISTS (SELECT 1 FROM profile_subscriptions s
+                         WHERE s.channel_id = v.channel_id AND s.profile_id <> pc.profile_id)
+            AND NOT EXISTS (SELECT 1 FROM profile_subscriptions t
+                             WHERE t.channel_id = v.channel_id AND t.profile_id = pc.profile_id)`,
+      )
+      .first<{ n: number }>()
+    expect(leaked?.n).toBe(0)
+  })
+
+  it('stays inside D1\'s bound parameters for a full walk', async () => {
+    const db = await twoProfiles()
+    const ids: string[] = []
+    for (let index = 0; index < 250; index++) {
+      const id = `youtube:w${index}`
+      await seedVideo(db, { id, channelExternalId: 'UCwalk' })
+      ids.push(id)
+    }
+    await setSubscribed(db, 'private', ['youtube:UCwalk'], NOW)
+    await db.prepare('DELETE FROM profile_candidates').run()
+
+    expect(await addSubscriptionCandidates(db, ids, NOW)).toBe(250)
   })
 })

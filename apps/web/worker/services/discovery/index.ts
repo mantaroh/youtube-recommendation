@@ -15,6 +15,7 @@ import {
   markChannelsFetched,
   setSubscribed,
   upsertChannels,
+  addSubscriptionCandidates,
   upsertVideos,
   videosMissingThumbnails,
 } from '../../db/videos.js'
@@ -159,7 +160,17 @@ export async function discoverSubscriptions(
 
   const items = videoIds.size > 0 ? await client.listVideos([...videoIds]) : []
   summary.found = items.length
-  summary.stored = await store(env, profileId, items, 'subscription')
+
+  // Stored without a candidacy, then filed against whoever subscribes to the channel.
+  // The walk covers every profile's subscriptions at once — one fetch for a channel two
+  // profiles follow — so attributing the result to the profile that ran it would give
+  // one account the other's uploads. It did: a hundred and ninety-five of them.
+  summary.stored = await store(env, null, items, 'subscription')
+  await addSubscriptionCandidates(
+    env.DB,
+    items.map((item) => `youtube:${item.externalId}`),
+    now,
+  )
   await markChannelsFetched(env.DB, channels.map((channel) => channel.id), now)
 
   summary.listCalls = client.tally.list
@@ -309,9 +320,16 @@ async function discoverBySearch(
  * Channels first: videos carry a foreign key to `channels`, and a search result from a
  * channel that is not yet a row would otherwise be rejected.
  */
+/**
+ * Store what a pass found.
+ *
+ * `profileId` is null when the caller will decide the candidacy itself — the upload walk
+ * does, because whose candidate a video is depends on who subscribes to its channel and
+ * not on who ran the pass.
+ */
 async function store(
   env: Env,
-  profileId: string,
+  profileId: string | null,
   items: SourceItem[],
   lane: Lane,
   query?: string,
