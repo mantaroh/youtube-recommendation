@@ -35,6 +35,22 @@ use_utf8_io()
 
 USER_AGENT = "personal-recommender-runner/1.0"
 
+# A claim that keeps failing the same way will keep failing. The night this was written
+# for spent seven hours receiving the same 500 every five minutes and said nothing about
+# it until someone thought to look — and the log had no times in it, so there was no way
+# to tell one failure from eighty-four.
+MAX_CONSECUTIVE_FAILURES = 5
+
+
+def log(message: str, *, error: bool = False) -> None:
+    """Every line stamped, in local time.
+
+    This writes to a file that gets read the next morning, when the only questions are
+    when something happened and how often. A line with no time answers neither.
+    """
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{stamp}] {message}", file=sys.stderr if error else sys.stdout, flush=True)
+
 
 @dataclass(frozen=True)
 class Window:
@@ -188,16 +204,13 @@ def main() -> int:
 
     credentials = read_credentials(arguments.credentials)
     if not credentials.get("ENGINE_PULL_TOKEN"):
-        print(
-            f"no ENGINE_PULL_TOKEN, in the environment or in {arguments.credentials}",
-            file=sys.stderr,
-        )
+        log(f"no ENGINE_PULL_TOKEN, in the environment or in {arguments.credentials}", error=True)
         return 2
 
     if not credentials.get("CF_ACCESS_CLIENT_ID"):
         # Not fatal: a deployment behind a Bypass policy needs no service token. Worth
         # saying, though, because the symptom otherwise is a 302 that looks like nothing.
-        print("no service token set; expect a redirect if Access protects this path", file=sys.stderr)
+        log("no service token set; expect a redirect if Access protects this path", error=True)
 
     window = parse_window(arguments.window)
     api = WorkerApi(arguments.url, build_headers(credentials))
@@ -210,12 +223,16 @@ def main() -> int:
     engine = AnagnorisisEngine(volume=arguments.volume)
 
     where = f"{arguments.url}  volume={arguments.volume}"
-    print(f"runner started  {where}  window={arguments.window or 'always'}")
+    log(f"runner started  {where}  window={arguments.window or 'always'}")
+
+    # Reset by any job that runs: a night that did work and then hit a bad patch has not
+    # been failing all along, and should not be treated as though it had.
+    failures = 0
 
     while True:
         if window and not window.contains(datetime.now()):
             if arguments.once:
-                print("outside the window; nothing done")
+                log("outside the window; nothing done")
                 return 0
             time.sleep(arguments.poll)
             continue
@@ -229,16 +246,25 @@ def main() -> int:
             # the client — which has nothing to do with the token at all.
             detail = error.read().decode("utf-8", "replace")[:300]
             if error.code == 403:
-                print(f"refused (403): {detail}", file=sys.stderr)
+                log(f"refused (403): {detail}", error=True)
                 return 1
-            print(f"claim failed ({error.code}): {detail}", file=sys.stderr)
+            failures += 1
+            log(f"claim failed ({error.code}), {failures} in a row: {detail}", error=True)
+            if failures >= MAX_CONSECUTIVE_FAILURES:
+                log("giving up: the same call has failed too many times", error=True)
+                return 1
             job = None
         except urllib.error.URLError as error:
-            print(f"cannot reach the worker: {error.reason}", file=sys.stderr)
+            failures += 1
+            log(f"cannot reach the worker ({failures} in a row): {error.reason}", error=True)
+            if failures >= MAX_CONSECUTIVE_FAILURES:
+                log("giving up: the worker has been unreachable too long", error=True)
+                return 1
             job = None
 
         if job:
-            print(run_one(api, engine, job), flush=True)
+            failures = 0
+            log(run_one(api, engine, job))
             if arguments.once:
                 return 0
             # Straight back for the next one: a queue is usually more than one job, and
@@ -246,7 +272,7 @@ def main() -> int:
             continue
 
         if arguments.once:
-            print("nothing queued")
+            log("nothing queued")
             return 0
         time.sleep(arguments.poll)
 
