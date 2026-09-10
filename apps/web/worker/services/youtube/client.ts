@@ -194,6 +194,33 @@ export class YouTubeClient {
     return ids
   }
 
+  /**
+   * Channels matching a term. One search call, the same hundred units as a video search.
+   *
+   * The only way left to ask "who else is like this". `search.list`'s `relatedToVideoId`
+   * was withdrawn in 2023 and a channel's featured-channel list went with it, so finding
+   * a neighbouring channel means describing it in words and searching for it.
+   */
+  async searchChannels(term: string, options: SearchOptions = {}): Promise<string[]> {
+    const params: Record<string, string> = {
+      part: 'id',
+      q: term,
+      type: 'channel',
+      maxResults: String(Math.min(50, Math.max(1, options.maxResults ?? 10))),
+      order: options.order ?? 'relevance',
+    }
+    if (options.regionCode) params.regionCode = options.regionCode
+    if (options.relevanceLanguage) params.relevanceLanguage = options.relevanceLanguage
+
+    const payload = await this.get<SearchListResponse>('search', params, 'search')
+    const ids: string[] = []
+    for (const entry of payload.items ?? []) {
+      const channelId = entry.id?.channelId
+      if (channelId) ids.push(channelId)
+    }
+    return ids
+  }
+
   private async get<T>(
     path: string,
     params: Record<string, string>,
@@ -326,7 +353,7 @@ interface PlaylistItemListResponse {
 }
 
 interface SearchListResponse {
-  items?: Array<{ id?: { videoId?: string } }>
+  items?: Array<{ id?: { videoId?: string; channelId?: string } }>
 }
 
 interface SubscriptionListResponse {

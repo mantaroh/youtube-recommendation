@@ -1,7 +1,12 @@
 import { Hono } from 'hono'
 import { discoveryRunRequestSchema, SEARCH_QUOTA_PER_DAY } from '@ypr/domain'
 import type { AppBindings } from './types.js'
-import { backfillThumbnails, runDiscovery, syncSubscriptions } from '../services/discovery/index.js'
+import {
+  backfillThumbnails,
+  expandFromLikedChannels,
+  runDiscovery,
+  syncSubscriptions,
+} from '../services/discovery/index.js'
 import { usedToday } from '../db/quota.js'
 import { listChannels } from '../db/videos.js'
 
@@ -34,6 +39,18 @@ discoveryRoutes.post('/discovery/run', async (context) => {
 discoveryRoutes.post('/discovery/subscriptions', async (context) => {
   const app = context.get('app')
   return context.json(await syncSubscriptions(app.env, app.profileId, app.now))
+})
+
+/**
+ * Look for channels like the ones already liked.
+ *
+ * Separate from `/discovery` because it answers a different question — not "more of what
+ * I watch" but "who else is doing this" — and because it is the only pass that can
+ * introduce a channel the reader has never seen.
+ */
+discoveryRoutes.post('/discovery/channels', async (context) => {
+  const app = context.get('app')
+  return context.json(await expandFromLikedChannels(app.env, app.profileId, app.now))
 })
 
 /**

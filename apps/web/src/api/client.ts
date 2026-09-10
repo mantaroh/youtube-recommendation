@@ -116,6 +116,12 @@ export interface YouTubeStatus {
 export const api = {
   status: () => request<StatusResponse>('/status'),
 
+  expandChannels: () =>
+    request<{ queries: string[]; found: number; stored: number; errors: string[] }>(
+      '/discovery/channels',
+      { method: 'POST' },
+    ),
+
   backfillThumbnails: () =>
     request<{ examined: number; refreshed: number; errors: string[] }>('/discovery/thumbnails', {
       method: 'POST',

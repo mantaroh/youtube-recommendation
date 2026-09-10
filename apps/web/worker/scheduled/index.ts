@@ -1,7 +1,16 @@
 import type { EpochMillis } from '@ypr/domain'
-import { DEFAULT_PROFILE_ID, DISCOVERY_SEARCH_BUDGET } from '@ypr/domain'
+import {
+  CHANNEL_EXPANSION_PER_RUN,
+  DEFAULT_PROFILE_ID,
+  DISCOVERY_SEARCH_BUDGET,
+} from '@ypr/domain'
 import type { Env } from '../env.js'
-import { backfillThumbnails, runDiscovery, syncSubscriptions } from '../services/discovery/index.js'
+import {
+  backfillThumbnails,
+  expandFromLikedChannels,
+  runDiscovery,
+  syncSubscriptions,
+} from '../services/discovery/index.js'
 import { reconcileJobs } from '../services/model/reconcile.js'
 import { submitScoring } from '../services/model/score.js'
 import { NotEnoughRatings, submitTraining } from '../services/model/train.js'
@@ -77,13 +86,25 @@ export async function runScheduled(env: Env, now: EpochMillis): Promise<Schedule
     }
 
     if (hour === 6) {
+      const perProfile = searchBudgetPerProfile(env, targets.length)
+      // Split between looking for videos and looking for channels. The video lanes keep
+      // the larger share because they are what moves the feed day to day; the expansion
+      // is how a taste the reader holds but has no channel for gets found at all, so it
+      // is small and constant rather than occasional.
+      const forExpansion = Math.min(CHANNEL_EXPANSION_PER_RUN, Math.max(1, Math.floor(perProfile / 3)))
+
       summaries.push({
         task: 'discovery',
         profileId,
         detail: await runDiscovery(env, profileId, now, {
           lanes: ['related', 'explore'],
-          searchBudget: searchBudgetPerProfile(env, targets.length),
+          searchBudget: Math.max(1, perProfile - forExpansion),
         }),
+      })
+      summaries.push({
+        task: 'channel expansion',
+        profileId,
+        detail: await expandFromLikedChannels(env, profileId, now, { searchBudget: forExpansion }),
       })
       // New candidates are unscored, and an unscored video ranks as merely average. This
       // is what turns a discovery run into something the feed can act on.

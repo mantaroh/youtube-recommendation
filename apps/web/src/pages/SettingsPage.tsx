@@ -161,10 +161,19 @@ export function SettingsPage() {
           <button type="button" disabled={busy} onClick={() => void run('search pass', () => api.runDiscovery({ lanes: ['related', 'explore'] }))}>
             Search for candidates
           </button>
+          <button type="button" disabled={busy} onClick={() => void run('channel expansion', api.expandChannels)}>
+            Find channels like the ones you rate
+          </button>
           <button type="button" disabled={busy} onClick={() => void run('thumbnails', api.backfillThumbnails)}>
             Fetch missing thumbnails
           </button>
         </div>
+        <p className="panel-note">
+          The search lane takes its terms from every rating at once, so a taste held over
+          five videos loses every query to one held over fifteen. Channel expansion asks
+          about each liked channel separately, in its own words, which is the only pass
+          that can introduce a channel you have never seen.
+        </p>
         <p className="panel-note">
           The catalog carried over from the first version without thumbnails, and nothing
           re-reads a video it already has. A pass fills in two hundred of them for four of

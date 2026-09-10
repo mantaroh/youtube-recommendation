@@ -269,3 +269,66 @@ export function adjacentTopics(seeds: string[], limit: number, preferred: Script
 
   return [...found]
 }
+
+/**
+ * One set of terms per liked channel, rather than one ranking across everything.
+ *
+ * `interestTerms` builds a single weight table over every rated video and takes the top
+ * few. That works when a reader has one taste. When they have two, the larger one takes
+ * every slot: fifteen ratings on VTuber videos against five on educational ones put
+ * `vtuber`, `切り抜き` and `配信` in all ten places, and the educational half was never
+ * searched for at all — not once, across every query the system had run.
+ *
+ * A channel is the unit because it is the one grouping the reader has already made. Two
+ * channels they like are two things they like, whatever the ratio of ratings between
+ * them, and each gets its own terms.
+ */
+export interface ChannelInterest {
+  channelId: string
+  channelTitle: string
+  /** Mean rating across this channel's rated videos, on the 0..5 scale. */
+  affection: number
+  ratings: number
+  terms: string[]
+}
+
+export function channelInterests(
+  rated: Array<RatedText & { channelId: string | null }>,
+  options: { termsPerChannel?: number; minRatings?: number } = {},
+): ChannelInterest[] {
+  const termsPerChannel = options.termsPerChannel ?? 4
+  const minRatings = options.minRatings ?? 1
+
+  const byChannel = new Map<string, { title: string; items: RatedText[] }>()
+  for (const item of rated) {
+    if (item.rating < 3 || !item.channelId) continue
+    const entry = byChannel.get(item.channelId) ?? {
+      title: item.channelTitle ?? item.channelId,
+      items: [],
+    }
+    entry.items.push(item)
+    byChannel.set(item.channelId, entry)
+  }
+
+  const interests: ChannelInterest[] = []
+  for (const [channelId, entry] of byChannel) {
+    if (entry.items.length < minRatings) continue
+    const affection = entry.items.reduce((sum, item) => sum + item.rating, 0) / entry.items.length
+    // The channel's own name is the strongest description of it that exists, and it is
+    // what a channel search matches on most directly.
+    const terms = [entry.title, ...interestTerms(entry.items, termsPerChannel)].filter(Boolean)
+    interests.push({
+      channelId,
+      channelTitle: entry.title,
+      affection,
+      ratings: entry.items.length,
+      terms: [...new Set(terms)].slice(0, termsPerChannel + 1),
+    })
+  }
+
+  // Most liked first, and among equals the one with more ratings behind it — a five
+  // from one video is a weaker claim than a five averaged over six.
+  return interests.sort(
+    (left, right) => right.affection - left.affection || right.ratings - left.ratings,
+  )
+}

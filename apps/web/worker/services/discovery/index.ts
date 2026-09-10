@@ -3,6 +3,9 @@ import {
   DISCOVERY_INTEREST_CLUSTERS,
   DISCOVERY_QUERIES_PER_INTEREST,
   DISCOVERY_SEARCH_BUDGET,
+  CHANNEL_EXPANSION_PER_RUN,
+  CHANNELS_PER_EXPANSION,
+  UPLOADS_PER_FOUND_CHANNEL,
   THUMBNAIL_BACKFILL_PER_RUN,
 } from '@ypr/domain'
 import type { Env } from '../../env.js'
@@ -21,7 +24,7 @@ import {
 } from '../../db/videos.js'
 import { YouTubeClient, YouTubeError } from '../youtube/client.js'
 import { youtubeCredentials } from '../youtube/credentials.js'
-import { adjacentTopics, interestTerms, type RatedText } from './keywords.js'
+import { adjacentTopics, channelInterests, interestTerms, type RatedText } from './keywords.js'
 
 /**
  * Candidate discovery (design sections 17 through 20).
@@ -500,4 +503,165 @@ export async function backfillThumbnails(
   } catch (error) {
     return { examined: externalIds.length, refreshed: 0, errors: [describe(error)] }
   }
+}
+
+/**
+ * Find channels like the ones already liked, and take their recent uploads.
+ *
+ * The gap this closes: a reader subscribed to `ゆる民俗学ラジオ` and rating it well had
+ * never once been offered `ゆる言語学ラジオ`, because it was not in the catalog and
+ * nothing was looking for it. The search lane derives its terms from every rating at
+ * once, so the larger of two tastes takes every query and the smaller is never asked
+ * about.
+ *
+ * A channel at a time fixes that. Each liked channel gets its own search, in its own
+ * words, so a taste held over five videos is asked about as surely as one held over
+ * fifteen.
+ *
+ * `search.list?type=channel` is what is left to ask this with. `relatedToVideoId` was
+ * withdrawn in 2023 and featured-channel lists went with it, so "who else is like this"
+ * has to be spelled out and searched for.
+ */
+export async function expandFromLikedChannels(
+  env: Env,
+  profileId: string,
+  now: EpochMillis,
+  options: { budget?: SearchBudget; searchBudget?: number; fetchImpl?: typeof fetch } = {},
+): Promise<DiscoverySummary> {
+  const summary: DiscoverySummary = {
+    lane: 'explore',
+    queries: [],
+    found: 0,
+    stored: 0,
+    searchCalls: 0,
+    listCalls: 0,
+    errors: [],
+  }
+
+  const interests = await likedChannelInterests(env.DB, profileId)
+  if (interests.length === 0) {
+    summary.errors.push('no highly rated channels yet: rate a few videos first')
+    return summary
+  }
+
+  const credentials = await youtubeCredentials(env, now, options.fetchImpl, profileId)
+  if (!credentials.apiKey && !credentials.accessToken) {
+    summary.errors.push('no YouTube credentials configured')
+    return summary
+  }
+
+  const client = new YouTubeClient({
+    ...credentials,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  })
+  const settings = await loadSettings(env.DB, profileId)
+
+  const owned = options.budget === undefined
+  const budget =
+    options.budget ??
+    (await SearchBudget.open(
+      env.DB,
+      options.searchBudget ?? Number(env.DISCOVERY_SEARCH_BUDGET ?? DISCOVERY_SEARCH_BUDGET),
+      now,
+    ))
+
+  // One search per channel, most-liked first, and never more than a few in a run: the
+  // rest of the allowance belongs to the video searches, and a channel found today is
+  // still there tomorrow.
+  const known = await knownChannelIds(env.DB)
+  const videoIds = new Set<string>()
+
+  for (const interest of interests.slice(0, CHANNEL_EXPANSION_PER_RUN)) {
+    if (!budget.take()) {
+      summary.errors.push('search allowance spent')
+      break
+    }
+    const query = interest.terms.join(' ')
+    summary.queries.push(query)
+
+    try {
+      const channelIds = await client.searchChannels(query, {
+        maxResults: CHANNELS_PER_EXPANSION,
+        regionCode: settings.region,
+        relevanceLanguage: settings.language,
+      })
+
+      for (const channelId of channelIds) {
+        // Already in the catalog means already reachable: either subscribed and walked,
+        // or found by an earlier expansion. Spending uploads calls on it again finds
+        // the same videos.
+        if (known.has(`youtube:${channelId}`)) continue
+        try {
+          for (const id of await client.listChannelUploads(channelId, UPLOADS_PER_FOUND_CHANNEL)) {
+            videoIds.add(id)
+          }
+        } catch (error) {
+          if (error instanceof YouTubeError && error.status === 404) continue
+          summary.errors.push(`${channelId}: ${describe(error)}`)
+        }
+      }
+    } catch (error) {
+      summary.errors.push(`${query}: ${describe(error)}`)
+    }
+  }
+
+  const items = videoIds.size > 0 ? await client.listVideos([...videoIds]) : []
+  summary.found = items.length
+  // Candidates for this profile alone: it was this profile's ratings that pointed here.
+  summary.stored = await store(env, profileId, items, 'explore', `channels:${summary.queries.join(' | ')}`)
+
+  summary.searchCalls = client.tally.search
+  summary.listCalls = client.tally.list
+  await recordUsage(env.DB, 'list', client.tally.list, now)
+  if (owned) await budget.close()
+  return summary
+}
+
+/** Rated channels, best liked first, with the words that describe them. */
+async function likedChannelInterests(db: D1Database, profileId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT v.title AS title, v.metadata_json AS metadata_json, v.channel_id AS channel_id,
+              c.title AS channel_title, r.rating AS rating
+         FROM rating_events r
+         JOIN videos v ON v.id = r.video_id
+         LEFT JOIN channels c ON c.id = v.channel_id
+        WHERE r.profile_id = ?1 AND r.disabled_at IS NULL AND r.rating >= 3
+        ORDER BY r.created_at DESC
+        LIMIT 200`,
+    )
+    .bind(profileId)
+    .all<{
+      title: string
+      metadata_json: string | null
+      channel_id: string | null
+      channel_title: string | null
+      rating: number
+    }>()
+
+  return channelInterests(
+    (results ?? []).map((row) => {
+      let tags: string[] = []
+      if (row.metadata_json) {
+        try {
+          tags = (JSON.parse(row.metadata_json) as { tags?: string[] }).tags ?? []
+        } catch {
+          tags = []
+        }
+      }
+      return {
+        title: row.title,
+        tags,
+        channelId: row.channel_id,
+        channelTitle: row.channel_title,
+        rating: row.rating,
+      }
+    }),
+  )
+}
+
+/** Every channel already stored, so an expansion does not re-walk what it can reach. */
+async function knownChannelIds(db: D1Database): Promise<Set<string>> {
+  const { results } = await db.prepare('SELECT id FROM channels').all<{ id: string }>()
+  return new Set((results ?? []).map((row) => row.id))
 }

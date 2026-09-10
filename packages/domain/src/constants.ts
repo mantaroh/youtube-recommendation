@@ -125,6 +125,22 @@ export const MAX_JOB_ATTEMPTS = 3
  * is capped well below the limit.
  */
 export const SEARCH_QUOTA_PER_DAY = 100
+
+/**
+ * Liked channels one expansion pass asks about, and what it takes from each.
+ *
+ * A channel search is a search: a hundred quota units and one of the day's hundred
+ * calls, the same as looking for videos. Three a run leaves the rest of the allowance
+ * to the video lanes, and a channel that goes unasked-about today is still there
+ * tomorrow — this is a standing habit, not a one-off sweep.
+ *
+ * Ten channels back from each, five uploads from each of those: the point is to learn
+ * that a channel exists and put enough of it in front of the reader to judge, not to
+ * ingest its catalogue.
+ */
+export const CHANNEL_EXPANSION_PER_RUN = 3
+export const CHANNELS_PER_EXPANSION = 10
+export const UPLOADS_PER_FOUND_CHANNEL = 5
 export const DISCOVERY_SEARCH_BUDGET = 30
 export const DISCOVERY_QUERIES_PER_INTEREST = 3
 export const DISCOVERY_INTEREST_CLUSTERS = 10
