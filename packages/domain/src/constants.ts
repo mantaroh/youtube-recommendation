@@ -127,18 +127,22 @@ export const MAX_JOB_ATTEMPTS = 3
 export const SEARCH_QUOTA_PER_DAY = 100
 
 /**
- * Liked channels one expansion pass asks about, and what it takes from each.
+ * Searches one expansion pass makes, and what it takes from each.
  *
- * A channel search is a search: a hundred quota units and one of the day's hundred
- * calls, the same as looking for videos. Three a run leaves the rest of the allowance
- * to the video lanes, and a channel that goes unasked-about today is still there
- * tomorrow — this is a standing habit, not a one-off sweep.
+ * Searches, not channels: one term per query. Joining a channel's terms into a single
+ * query matches none of them well — three such searches returned five videos between
+ * them — so the terms are spent one at a time, round-robin across the liked channels.
  *
- * Ten channels back from each, five uploads from each of those: the point is to learn
- * that a channel exists and put enough of it in front of the reader to judge, not to
- * ingest its catalogue.
+ * A channel search costs what a video search costs: a hundred quota units and one of
+ * the day's hundred calls. Five a run is a third of a profile's allowance and leaves
+ * the rest to the video lanes. A term not spent today is still there tomorrow; this is
+ * a standing habit, not a sweep.
+ *
+ * Ten channels back from each search, five uploads from each of those: enough to learn
+ * that a channel exists and to put it in front of the reader to judge, not to ingest
+ * its catalogue.
  */
-export const CHANNEL_EXPANSION_PER_RUN = 3
+export const CHANNEL_EXPANSION_PER_RUN = 5
 export const CHANNELS_PER_EXPANSION = 10
 export const UPLOADS_PER_FOUND_CHANNEL = 5
 export const DISCOVERY_SEARCH_BUDGET = 30

@@ -3,7 +3,8 @@ import type { RatingValue } from '@ypr/domain'
 import type { Env } from '../env.js'
 import { appendRating } from '../db/ratings.js'
 import { channelInterests, interestTerms } from '../services/discovery/keywords.js'
-import { expandFromLikedChannels } from '../services/discovery/index.js'
+import { expandFromLikedChannels, interleaveTerms } from '../services/discovery/index.js'
+import { markChannelsFetched } from '../db/videos.js'
 import { createTestDatabase } from './d1.js'
 import { seedVideo, stubFetch } from './fixtures.js'
 
@@ -129,21 +130,10 @@ describe('the expansion pass', () => {
     const summary = await expandFromLikedChannels(envWith(db), 'default', NOW, { fetchImpl })
 
     expect(summary.stored).toBe(1)
-    expect(summary.searchCalls).toBe(1)
-    expect(summary.queries[0]).toContain('UCfolk')
-  })
-
-  it('does not spend uploads calls on channels already in the catalog', async () => {
-    const db = createTestDatabase()
-    await rate(db, 'youtube:v1', 'UCfolk', 5, 1)
-
-    // The search returns the channel the rating came from, which is already stored.
-    const fetchImpl = stubFetch([['type=channel', { items: [{ id: { channelId: 'UCfolk' } }] }]])
-    const summary = await expandFromLikedChannels(envWith(db), 'default', NOW, { fetchImpl })
-
-    expect(summary.found).toBe(0)
-    // One search and nothing else: no playlistItems call was made.
-    expect(summary.listCalls).toBe(0)
+    // The channel's own name goes first: the strongest description of it that exists.
+    // Its other terms follow as further queries, one search each.
+    expect(summary.queries[0]).toBe('UCfolk')
+    expect(summary.searchCalls).toBe(summary.queries.length)
   })
 
   it('says so rather than searching when nothing has been rated', async () => {
@@ -168,5 +158,92 @@ describe('the expansion pass', () => {
 
     expect(summary.searchCalls).toBe(1)
     expect(summary.errors).toContain('search allowance spent')
+  })
+})
+
+describe('spending the search allowance', () => {
+  /**
+   * The first version joined a channel's terms into one query. It read as economical and
+   * found almost nothing: three searches, five videos, and the channel the reader was
+   * missing still absent. `search` given four channel names matches none of them.
+   */
+  it('spends one term per query rather than joining them', () => {
+    const queries = interleaveTerms([{ terms: ['Folklore Radio', 'folklore', 'radio'] }], 3)
+    expect(queries).toEqual(['Folklore Radio', 'folklore', 'radio'])
+  })
+
+  it('takes one term from each channel before a second from any', () => {
+    // The allowance runs out mid-list. In order, the best-liked channel would spend the
+    // whole run and the others would go unasked — the failure this pass exists to fix.
+    const queries = interleaveTerms(
+      [
+        { terms: ['A1', 'A2', 'A3'] },
+        { terms: ['B1', 'B2'] },
+        { terms: ['C1'] },
+      ],
+      5,
+    )
+    expect(queries).toEqual(['A1', 'B1', 'C1', 'A2', 'B2'])
+  })
+
+  it('does not spend two searches on the same term', () => {
+    const queries = interleaveTerms([{ terms: ['same', 'x'] }, { terms: ['SAME', 'y'] }], 4)
+    expect(queries).toEqual(['same', 'x', 'y'])
+  })
+
+  it('stops at the limit', () => {
+    expect(interleaveTerms([{ terms: ['a', 'b', 'c'] }], 2)).toEqual(['a', 'b'])
+    expect(interleaveTerms([], 3)).toEqual([])
+  })
+})
+
+describe('which channels are worth walking', () => {
+  /**
+   * A channel row appears the moment one of its videos turns up in a search result. A
+   * thousand of the seventeen hundred stored had never had their uploads read, and
+   * skipping on "is in the catalog" threw away almost every channel the pass found.
+   */
+  it('walks a channel that is known but has never been read', async () => {
+    const db = createTestDatabase()
+    await rate(db, 'youtube:v1', 'UCfolk', 5, 1)
+    // Known because one of its videos was seen, never walked.
+    await seedVideo(db, { id: 'youtube:seen', channelExternalId: 'UCneighbour' })
+
+    const fetchImpl = stubFetch([
+      ['type=channel', { items: [{ id: { channelId: 'UCneighbour' } }] }],
+      ['playlistItems', { items: [{ contentDetails: { videoId: 'fresh' } }] }],
+      ['/videos', {
+        items: [{
+          id: 'fresh',
+          snippet: {
+            title: 'Something new',
+            description: '',
+            channelId: 'UCneighbour',
+            channelTitle: 'Neighbour',
+            publishedAt: new Date(NOW).toISOString(),
+            thumbnails: { high: { url: 'https://i.example.test/fresh.jpg' } },
+            tags: [],
+          },
+          contentDetails: { duration: 'PT20M' },
+          statistics: { viewCount: '10' },
+        }],
+      }],
+    ])
+
+    const summary = await expandFromLikedChannels(envWith(db), 'default', NOW, { fetchImpl })
+    expect(summary.stored).toBe(1)
+  })
+
+  it('leaves alone a channel whose uploads have been read', async () => {
+    const db = createTestDatabase()
+    await rate(db, 'youtube:v1', 'UCfolk', 5, 1)
+    await seedVideo(db, { id: 'youtube:seen', channelExternalId: 'UCdone' })
+    await markChannelsFetched(db, ['youtube:UCdone'], NOW)
+
+    const fetchImpl = stubFetch([['type=channel', { items: [{ id: { channelId: 'UCdone' } }] }]])
+    const summary = await expandFromLikedChannels(envWith(db), 'default', NOW, { fetchImpl })
+
+    expect(summary.found).toBe(0)
+    expect(summary.listCalls).toBe(0)
   })
 })

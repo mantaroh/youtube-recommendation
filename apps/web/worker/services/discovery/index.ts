@@ -565,18 +565,14 @@ export async function expandFromLikedChannels(
       now,
     ))
 
-  // One search per channel, most-liked first, and never more than a few in a run: the
-  // rest of the allowance belongs to the video searches, and a channel found today is
-  // still there tomorrow.
-  const known = await knownChannelIds(env.DB)
+  const walked = await walkedChannelIds(env.DB)
   const videoIds = new Set<string>()
 
-  for (const interest of interests.slice(0, CHANNEL_EXPANSION_PER_RUN)) {
+  for (const query of interleaveTerms(interests, CHANNEL_EXPANSION_PER_RUN)) {
     if (!budget.take()) {
       summary.errors.push('search allowance spent')
       break
     }
-    const query = interest.terms.join(' ')
     summary.queries.push(query)
 
     try {
@@ -587,10 +583,11 @@ export async function expandFromLikedChannels(
       })
 
       for (const channelId of channelIds) {
-        // Already in the catalog means already reachable: either subscribed and walked,
-        // or found by an earlier expansion. Spending uploads calls on it again finds
-        // the same videos.
-        if (known.has(`youtube:${channelId}`)) continue
+        // Walked, not merely known. A channel row appears the moment one of its videos
+        // turns up in a search result, and a thousand of the seventeen hundred stored
+        // had never had their uploads read. Skipping on "is in the catalog" threw away
+        // almost every channel this pass found.
+        if (walked.has(`youtube:${channelId}`)) continue
         try {
           for (const id of await client.listChannelUploads(channelId, UPLOADS_PER_FOUND_CHANNEL)) {
             videoIds.add(id)
@@ -660,8 +657,50 @@ async function likedChannelInterests(db: D1Database, profileId: string) {
   )
 }
 
-/** Every channel already stored, so an expansion does not re-walk what it can reach. */
-async function knownChannelIds(db: D1Database): Promise<Set<string>> {
-  const { results } = await db.prepare('SELECT id FROM channels').all<{ id: string }>()
+/**
+ * Channels whose uploads have actually been read.
+ *
+ * Not the same as channels that exist. A row appears as soon as one of a channel's
+ * videos shows up in a search result, and most of them are that: a thousand of the
+ * seventeen hundred stored had never been walked. Treating those as done is what left
+ * an expansion that searched three times with five videos to show for it.
+ */
+async function walkedChannelIds(db: D1Database): Promise<Set<string>> {
+  const { results } = await db
+    .prepare('SELECT id FROM channels WHERE last_fetched_at IS NOT NULL')
+    .all<{ id: string }>()
   return new Set((results ?? []).map((row) => row.id))
+}
+
+/**
+ * One term per search, taken round-robin across the liked channels.
+ *
+ * Joining a channel's terms into one query looked economical and was useless: `search`
+ * with four channel names in it matches none of them well, and three such searches
+ * returned almost nothing. A single name is a query YouTube can answer.
+ *
+ * Round-robin because the allowance runs out mid-list. Taking one channel's terms in
+ * order would spend the whole run on the best-liked one and leave the others unasked,
+ * which is the failure this pass exists to fix.
+ */
+export function interleaveTerms(
+  interests: Array<{ terms: string[] }>,
+  limit: number,
+): string[] {
+  const queries: string[] = []
+  const seen = new Set<string>()
+  const depth = Math.max(0, ...interests.map((interest) => interest.terms.length))
+
+  for (let index = 0; index < depth && queries.length < limit; index++) {
+    for (const interest of interests) {
+      if (queries.length >= limit) break
+      const term = interest.terms[index]
+      if (!term) continue
+      const key = term.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      queries.push(term)
+    }
+  }
+  return queries
 }
