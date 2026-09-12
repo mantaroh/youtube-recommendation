@@ -87,3 +87,53 @@ def test_a_forbidden_claim_stops_at_once(monkeypatch, tmp_path, capsys):
     assert run_main(monkeypatch, api, tmp_path) == 1
     assert api.calls == 1
     assert "refused (403)" in capsys.readouterr().err
+
+
+class _Done(Exception):
+    """Ends the polling loop, which otherwise runs forever by design."""
+
+
+class _FlakyApi:
+    """Fails, then answers, then fails again — the shape of an intermittent network."""
+
+    def __init__(self, pattern: str) -> None:
+        # "x" is a failure, "." an answer with nothing queued.
+        self.pattern = pattern
+        self.calls = 0
+
+    def claim(self):
+        if self.calls >= len(self.pattern):
+            raise _Done
+        step = self.pattern[self.calls]
+        self.calls += 1
+        if step == "x":
+            raise urllib.error.URLError("Temporary failure in name resolution")
+        return None
+
+
+def test_an_answer_clears_the_count_even_with_nothing_queued(monkeypatch, tmp_path, capsys):
+    """
+    The counter is for a wall, not for a tally.
+
+    It reset only when a job came back, so a profile with an empty queue turned three
+    unrelated blips — a DNS failure, a reset connection and another DNS failure, spread
+    over eleven and a half hours — into "three in a row", two short of giving up.
+    """
+    # Fail four times over, but reach the Worker between each: never five in a row.
+    api = _FlakyApi("x.x.x.x.")
+    with pytest.raises(_Done):
+        run_main(monkeypatch, api, tmp_path)
+
+    err = capsys.readouterr().err
+    assert "giving up" not in err
+    # Each failure is the first of its own run, not the next in a tally.
+    assert err.count("1 in a row") == 4
+    assert "2 in a row" not in err
+
+
+def test_a_wall_still_stops_it(monkeypatch, tmp_path, capsys):
+    # The case the counter exists for: no answer at all, five times running.
+    api = _FlakyApi("xxxxxxxx")
+    assert run_main(monkeypatch, api, tmp_path) == 1
+    assert api.calls == MAX_CONSECUTIVE_FAILURES
+    assert "giving up" in capsys.readouterr().err

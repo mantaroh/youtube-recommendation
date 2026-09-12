@@ -225,8 +225,9 @@ def main() -> int:
     where = f"{arguments.url}  volume={arguments.volume}"
     log(f"runner started  {where}  window={arguments.window or 'always'}")
 
-    # Reset by any job that runs: a night that did work and then hit a bad patch has not
-    # been failing all along, and should not be treated as though it had.
+    # Reset by any claim that gets an answer: a run that has been reaching the Worker all
+    # night and then hits a bad patch has not been failing all along, and should not be
+    # treated as though it had.
     failures = 0
 
     while True:
@@ -239,6 +240,12 @@ def main() -> int:
 
         try:
             job = api.claim()
+            # An answer, even an empty one, means there is no wall to keep hitting. The
+            # counter used to reset only when a job came back, so a profile with nothing
+            # queued turned three unrelated blips — a DNS failure, a reset connection and
+            # another DNS failure, spread over eleven and a half hours — into "three in a
+            # row", two short of giving up. That is not what the counter is for.
+            failures = 0
         except urllib.error.HTTPError as error:
             # 403 comes from two very different places and waiting fixes neither, so the
             # body is printed rather than guessed at: the Worker answers `forbidden` for
@@ -263,7 +270,6 @@ def main() -> int:
             job = None
 
         if job:
-            failures = 0
             log(run_one(api, engine, job))
             if arguments.once:
                 return 0
