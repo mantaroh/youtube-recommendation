@@ -223,3 +223,54 @@ describe('syncing subscriptions', () => {
     expect(result.errors[0]).toMatch(/no YouTube account/)
   })
 })
+
+describe('when the popularity chart runs', () => {
+  /**
+   * The chart is the same chart for everyone, so running it for every profile fills each
+   * of their pools with identical videos. Two accounts kept separate precisely to keep
+   * two tastes apart had four hundred and fifteen candidates in common, and four hundred
+   * and thirteen of them came from here — a quarter of the smaller pool.
+   *
+   * It stays for the case it was added for, which is the only one it answers well: a
+   * profile that has rated nothing has no other way to discover anything.
+   */
+  it('runs for a profile that has rated nothing', async () => {
+    const db = createTestDatabase()
+    const fetchImpl = stubFetch([['chart=mostPopular', { items: [] }]])
+
+    const result = await runDiscovery(envWith(db), 'default', NOW, {
+      lanes: ['explore'],
+      fetchImpl,
+    })
+
+    expect(result.summaries.some((s) => s.queries.some((q) => q.startsWith('JP/')))).toBe(true)
+  })
+
+  it('stops once the profile has ratings to work from', async () => {
+    const db = createTestDatabase()
+    for (let index = 0; index < 6; index++) {
+      const id = `youtube:v${index}`
+      await seedVideo(db, { id, title: `Browser engines ${index}`, tags: ['firefox', 'browser'] })
+      await appendRating(db, {
+        id: `e${index}`,
+        profileId: 'default',
+        videoId: id,
+        rating: 5,
+        createdAt: NOW + index,
+      })
+    }
+
+    // Only search stubs: a chart call would have nothing to answer it and would throw.
+    const fetchImpl = stubFetch([
+      ['/search', { items: [] }],
+      ['/videos', { items: [] }],
+    ])
+
+    const result = await runDiscovery(envWith(db), 'default', NOW, {
+      lanes: ['explore'],
+      fetchImpl,
+    })
+
+    expect(result.summaries.some((s) => s.queries.some((q) => q.startsWith('JP/')))).toBe(false)
+  })
+})

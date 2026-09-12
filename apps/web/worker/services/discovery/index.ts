@@ -92,11 +92,24 @@ export async function runDiscovery(
       const terms = adjacentTopics(seeds, DISCOVERY_QUERIES_PER_INTEREST, preferred)
       summaries.push(await discoverBySearch(env, profileId, 'explore', terms, budget, now, settings, options))
 
-      // The popularity chart costs one unit per region and category and no search call
-      // at all, so it runs alongside the searches rather than instead of them. It is
-      // also the only pass that works before anything has been rated: without it a new
-      // installation discovers nothing until the first ratings exist.
-      summaries.push(await discoverPopular(env, profileId, settings, now, options))
+      // The popularity chart, but only while there is nothing better to go on.
+      //
+      // It costs a unit per region and category and no search call at all, and it is the
+      // only pass that works before anything has been rated — without it a new profile
+      // discovers nothing until the first ratings exist. That is worth keeping.
+      //
+      // What it cannot do is tell two readers apart. The chart is the same chart for
+      // everyone, so running it for every profile every day fills each of their pools
+      // with the same videos: four hundred and thirteen of the four hundred and fifteen
+      // candidates two accounts here had in common came from it, a quarter of the
+      // smaller pool. Two people who keep separate accounts to keep their tastes apart
+      // were being handed the same suggestions.
+      //
+      // So it runs while a profile has no seeds of its own and stops once it has. By
+      // then the searches and the channel expansion are asking better questions.
+      if (seeds.length === 0) {
+        summaries.push(await discoverPopular(env, profileId, settings, now, options))
+      }
     }
   }
 
